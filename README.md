@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ⚽ Europa FC - Sistema de Análisis GPS
 
 Aplicación profesional de Streamlit para análisis de datos físicos de partidos.
@@ -267,3 +268,7 @@ Para dudas técnicas:
 
 **Desarrollado para Europa FC** ⚽📊  
 **Versión 1.0** - Noviembre 2025
+=======
+# europa-fc-gps-dashboard
+📊 Dashboard GPS para Europa FC
+>>>>>>> 5d0e68725f35945849d41a6e9c32fdc3b0533875
