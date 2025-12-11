@@ -1,0 +1,64 @@
+# ---------- Python / build / env ----------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+.venv/
+ENV/
+.build/
+build/
+dist/
+downloads/
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+.wheels/
+*.so
+.nox/
+.tox/
+
+# ---------- Test / tooling caches ----------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+.cache/
+
+# ---------- Notebooks ----------
+.ipynb_checkpoints/
+
+# ---------- Editors / IDE ----------
+.vscode/
+.idea/
+*.code-workspace
+
+# ---------- OS junk ----------
+.DS_Store
+Thumbs.db
+Icon?
+._*
+
+# ---------- Logs ----------
+logs/
+*.log
+
+# ---------- Secrets (¡atención!) ----------
+.env
+.env.*
+*.env
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+
+# ---------- DB / runtime ----------
+*.sqlite3
+instance/
+
+# ---------- Mantener datos y assets en Git ----------
+!data/**
+!assets/**
