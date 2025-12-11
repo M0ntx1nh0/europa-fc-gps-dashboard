@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 # Ruta al archivo Excel de plantilla
-RUTA_PLANTILLA = '/Users/macmontxinho/Desktop/Teams/Europa/Plantillas CE Europa.XLSX'
+RUTA_PLANTILLA = 'assets/jugadores/Plantillas CE Europa.XLSX'
 HOJA_PLANTILLA = 'First Team'
 
 
