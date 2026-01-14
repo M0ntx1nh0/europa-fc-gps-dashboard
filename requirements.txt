@@ -5,3 +5,4 @@ plotly==5.18.0
 openpyxl==3.1.2
 Pillow==10.4.0
 python-dateutil==2.9.0.post0
+mplsoccer==1.6.1
