@@ -1,6 +1,7 @@
 """
 Europa FC - Aplicación de Análisis GPS
 Aplicación principal (Landing page)
+v2.0.2 - Actualizada con nueva página Estatus del Equipo
 """
 
 import streamlit as st
@@ -43,6 +44,14 @@ st.markdown("""
         border-radius: 0.5rem;
         border-left: 4px solid #1f77b4;
     }
+    .new-badge {
+        background-color: #ff6b6b;
+        color: white;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.3rem;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,7 +80,8 @@ def main():
             st.markdown("""
             ### 👋 Bienvenido al Sistema de Análisis GPS
             
-            Esta aplicación te permite analizar datos físicos de los partidos del Europa FC.
+            Esta aplicación te permite analizar datos físicos de los partidos del Europa FC
+            con herramientas avanzadas de visualización y análisis estadístico.
             
             #### 🚀 Para comenzar:
             
@@ -82,15 +92,16 @@ def main():
             
             #### 📊 Páginas disponibles:
             
-            - **🏠 Home:** Referencias normalizadas a 94 minutos
-            - **📊 Equipo:** Análisis del equipo y evolución
-            - **👤 Individual:** Análisis por jugador
+            - **🏠 Home:** Vista general y referencias normalizadas
+            - **📊 Equipo:** Player Cards y análisis del partido
+            - **👤 Individual:** Evolución y análisis por jugador
+            - **📊 Estatus del Equipo:** <span class="new-badge">NUEVO</span> Vista panorámica con gráficos avanzados
             
             ---
             
             **Nota:** Los archivos CSV deben estar en formato Ubiko GPS
             y contener la columna `task='Total'`
-            """)
+            """, unsafe_allow_html=True)
     
     else:
         # Mostrar información del dataset
@@ -128,49 +139,72 @@ def main():
         
         st.markdown("---")
         
-        # Instrucciones
+        # Instrucciones mejoradas
         st.markdown("""
         ### 🎯 Cómo usar la aplicación
         
-        #### 1️⃣ **Configurar filtros** (Sidebar)
+        #### 1️⃣ **Configurar filtros** (Sidebar izquierdo)
         - Selecciona el rango de fechas que quieres analizar
         - Elige el partido específico que quieres estudiar
         - Selecciona la métrica que te interesa (HSR, Sprints, etc.)
         
         #### 2️⃣ **Navegar por las páginas**
-        - **🏠 Home:** Consulta las estadísticas de referencia normalizadas
-        - **📊 Equipo:** Analiza el rendimiento del equipo en el partido seleccionado
-        - **👤 Individual:** Revisa el rendimiento individual de cada jugador
+        
+        **Para análisis rápido:**
+        - **🏠 Home:** Estadísticas de referencia normalizadas a 94 min
+        - **📊 Equipo:** Player Cards con rendimiento individual del partido
+        
+        **Para análisis detallado:**
+        - **👤 Individual:** Evolución temporal de cada jugador
+        - **📊 Estatus del Equipo:** <span class="new-badge">NUEVO v2.0</span> Vista panorámica del equipo
         
         #### 3️⃣ **Interpretar los datos**
         - Las **referencias** están normalizadas a 94 minutos (solo jugadores >60 min)
         - Los **datos del partido** muestran valores originales (todos los jugadores)
-        - Los gráficos incluyen líneas de referencia para facilitar la comparación
+        - Los **colores** en Player Cards indican rendimiento vs referencia
         
         ---
         
         ### 📖 Métricas disponibles
-        """)
+        """, unsafe_allow_html=True)
         
         # Mostrar métricas disponibles en columnas
         col1, col2, col3 = st.columns(3)
         
-        metricas_lista = list(METRICAS_DICT.keys())
-        tercio = len(metricas_lista) // 3 + 1
-        
         with col1:
-            for metrica in metricas_lista[:tercio]:
+            st.markdown("**Métricas de Distancia:**")
+            for metrica in ['HSR', 'Distancia Total', 'Distancia a Sprint']:
                 st.markdown(f"- ✅ {metrica}")
         
         with col2:
-            for metrica in metricas_lista[tercio:2*tercio]:
+            st.markdown("**Métricas de Intensidad:**")
+            for metrica in ['Sprints', 'Velocidad Máxima', 'Aceleraciones', 'Desaceleraciones']:
                 st.markdown(f"- ✅ {metrica}")
         
         with col3:
-            for metrica in metricas_lista[2*tercio:]:
+            st.markdown("**Métricas Relativas:**")
+            for metrica in ['HSR Relativo', 'Distancia por Minuto', 'HMLD', 'HMLD Relativo']:
                 st.markdown(f"- ✅ {metrica}")
         
         st.markdown("---")
+        
+        # Novedades v2.0
+        with st.expander("✨ Novedades en v2.0 - Nueva Página", expanded=False):
+            st.markdown("""
+            ### 🎉 Nueva: Estatus del Equipo
+            
+            Vista panorámica del rendimiento colectivo:
+            
+            #### 🎯 Filtros Separados:
+            - **Filtros de Partido:** Específico / Últimos N / Rango
+            - **Filtros de Referencia:** 10 estadísticos (Media, P90, etc.)
+            
+            #### 📊 4 Tabs:
+            1. **Vista General:** Barras comparativas
+            2. **Distribuciones:** Histogramas + percentiles
+            3. **Comparativas:** Scatter plots con cuadrantes
+            4. **Evolución Temporal:** Tendencias del equipo
+            """)
         
         # Vista previa de datos
         with st.expander("📋 Vista previa de datos"):
@@ -185,7 +219,7 @@ def main():
     <div style='text-align: center; color: #666; padding: 2rem;'>
         <p><strong>Europa FC - Sistema de Análisis GPS</strong></p>
         <p>Desarrollado con ❤️ usando Streamlit</p>
-        <p style='font-size: 0.8rem;'>v1.0 - 2025</p>
+        <p style='font-size: 0.8rem;'>v2.0.2 - Enero 2025</p>
     </div>
     """, unsafe_allow_html=True)
 
