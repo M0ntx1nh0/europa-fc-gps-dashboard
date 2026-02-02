@@ -8,7 +8,7 @@ import pandas as pd
 from pathlib import Path
 
 from config import DATA_DIR
-from utils import cargar_datos_csv, procesar_datos, filtrar_por_fechas, obtener_partidos_disponibles
+from utils import cargar_datos_desde_drive, procesar_datos, filtrar_por_fechas, obtener_partidos_disponibles
 
 
 def inicializar_session_state():
@@ -52,7 +52,7 @@ def render_sidebar():
         st.header("🎯 Configuración")
         
         # Información de la carpeta de datos
-        st.info(f"📁 Carpeta de datos:\n`{DATA_DIR}`")
+        st.info("☁️ Datos desde Google Drive")
         
         # ========================================
         # BOTÓN DE CARGA
@@ -60,7 +60,7 @@ def render_sidebar():
         if st.button("🔄 Cargar/Recargar Datos", use_container_width=True):
             with st.spinner("Cargando datos..."):
                 # Cargar datos
-                df = cargar_datos_csv(DATA_DIR)
+                df = cargar_datos_desde_drive(equipo='europa')
                 
                 if df is not None:
                     # Procesar datos

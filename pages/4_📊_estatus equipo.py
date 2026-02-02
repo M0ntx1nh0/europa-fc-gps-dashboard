@@ -857,9 +857,9 @@ def main():
             with col3:
                 tipo_viz = st.radio(
                     "Tipo de visualización:",
-                    options=['Radar/Spider Chart', 'Heatmap'],
+                    options=['Radar/Spider Chart', 'Heatmap', 'Gráfico de Barras'],
                     key='tipo_viz',
-                    help="Radar: Perfiles visuales completos\nHeatmap: Tabla de colores compacta"
+                    help="Radar: Perfiles visuales completos (mín. 3 métricas)\nHeatmap: Tabla de colores compacta\nBarras: Comparación directa (cualquier número de métricas)"
                 )
             
             st.markdown("---")
@@ -974,9 +974,10 @@ def main():
                 )
                 
                 if len(metricas_comparar) < 3:
-                    st.warning("⚠️ Selecciona al menos 3 métricas")
-                    st.stop()
-            
+                    if tipo_viz == 'Radar/Spider Chart':
+                        st.warning("⚠️ El Radar Chart requiere al menos 3 métricas. Selecciona más métricas o usa 'Gráfico de Barras'.")
+                        st.stop()
+                            
             st.markdown("---")
             
             # ========================================
@@ -1164,7 +1165,7 @@ def main():
                     st.error(f"Error al crear el radar: {str(e)}")
                     st.write("**Debug info:**", e)
                 
-            else:  # Heatmap
+            elif tipo_viz == "heatmap": 
                 st.subheader("🌡️ Heatmap - Tabla de Calor")
                 
                 # Preparar matriz para heatmap
@@ -1247,6 +1248,101 @@ def main():
                 - Los números muestran los **valores reales**, los colores están normalizados para comparar
                 """)
             
+            else:  # Gráfico de Barras
+                st.subheader("📊 Gráfico de Barras - Comparación Directa")
+                
+                # Preparar datos
+                nombres = []
+                datos_por_metrica = {metricas_disponibles[m]: [] for m in metricas_comparar}
+                
+                for idx, (df_idx, row) in enumerate(df_comparacion.iterrows()):
+                    nombres.append(row['nombre'])
+                    for metrica in metricas_comparar:
+                        datos_por_metrica[metricas_disponibles[metrica]].append(row[metrica])
+                
+                # Colores para cada jugador (consistentes)
+                colores_jugadores = ['#1E88E5', '#FF6F00', '#43A047', '#E53935', '#8E24AA']
+                
+                # Crear subplots (una columna por métrica)
+                from plotly.subplots import make_subplots
+                
+                n_metricas = len(metricas_comparar)
+                
+                fig = make_subplots(
+                    rows=1, 
+                    cols=n_metricas,
+                    subplot_titles=[metricas_disponibles[m] for m in metricas_comparar],
+                    horizontal_spacing=0.08,
+                    specs=[[{"type": "bar"}] * n_metricas]
+                )
+                
+                # Para cada métrica, crear un subplot
+                for col_idx, (metrica, metrica_nombre) in enumerate(datos_por_metrica.items(), start=1):
+                    valores = metrica_nombre
+                    
+                    # Añadir barras de cada jugador en este subplot
+                    for jug_idx, (nombre, valor) in enumerate(zip(nombres, datos_por_metrica[metrica])):
+                        fig.add_trace(
+                            go.Bar(
+                                name=nombre,
+                                x=[metrica],
+                                y=[valor],
+                                text=[f"{valor:.1f}"],
+                                textposition='outside',
+                                marker_color=colores_jugadores[jug_idx % len(colores_jugadores)],
+                                showlegend=(col_idx == 1),  # Solo mostrar leyenda en primer subplot
+                                legendgroup=nombre,  # Agrupar para leyenda consistente
+                                hovertemplate=f'<b>{nombre}</b><br>' +
+                                              f'{metrica}: %{{y:.1f}}<br>' +
+                                              '<extra></extra>'
+                            ),
+                            row=1,
+                            col=col_idx
+                        )
+                
+                # Aplicar tamaño de texto
+                fig.update_traces(
+                    textfont=dict(size=13, color='black'),
+                    textposition='outside',
+                    selector=dict(type='bar')
+                )
+                
+                # Layout general
+                fig.update_layout(
+                    title=f"Comparativa de Métricas ({estadistico_comparar}) - Escalas Independientes",
+                    height=500,
+                    barmode='group',
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.15,
+                        xanchor="center",
+                        x=0.5
+                    ),
+                    uniformtext_minsize=12,
+                    uniformtext_mode='show'
+                )
+                
+                # Ocultar etiquetas del eje X (ya están en títulos de subplot)
+                fig.update_xaxes(showticklabels=False)
+                
+                # Configurar ejes Y independientes
+                for i in range(1, n_metricas + 1):
+                    fig.update_yaxes(title_text="Valor", row=1, col=i)
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Explicación
+                st.info("""
+                📊 **Cómo interpretar:**
+                - Cada panel muestra una métrica diferente con su **propia escala**
+                - Cada color representa un jugador/posición (consistente entre paneles)
+                - Las **escalas son independientes**: sprints ~30 y distancia ~8000 se ven proporcionadas
+                - Los números sobre las barras muestran los valores exactos
+                - **Ideal para comparar múltiples métricas sin distorsión visual**
+                """)
+                
             # Tabla de valores reales
             st.subheader("📊 Tabla de Valores Reales")
             
@@ -1265,7 +1361,7 @@ def main():
 
 
     
-    # ========================================
+   # ========================================
     # TAB 3: EVOLUCIÓN TEMPORAL
     # ========================================
     
@@ -1291,9 +1387,6 @@ def main():
                 key='tipo_linea_evol'
             )
         
-        # Variable suavizado siempre False (eliminado checkbox)
-        suavizado = False
-        
         # Si es selección manual, mostrar selector de jugadores
         jugadores_seleccionados_evol = None
         if tipo_linea == 'Selección manual':
@@ -1315,7 +1408,6 @@ def main():
         metrica_evol_nombre = metricas_disponibles[metrica_evol]
         
         # Preparar datos temporales
-        # IMPORTANTE: Usar df_filtrado para respetar los filtros de partido
         df_temporal = df_filtrado.copy()
         df_temporal = df_temporal.sort_values('date')
         
@@ -1327,19 +1419,13 @@ def main():
             df_media = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
             df_media = df_media.sort_values('date')
             
-            if suavizado and len(df_media) >= 3:
-                df_media[f'{metrica_evol}_smooth'] = df_media[metrica_evol].rolling(window=3, center=True).mean()
-                y_data = df_media[f'{metrica_evol}_smooth']
-            else:
-                y_data = df_media[metrica_evol]
-            
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Bar(
                 x=df_media['date'],
-                y=y_data,
-                mode='lines+markers',
+                y=df_media[metrica_evol],
                 name='Media del equipo',
-                line=dict(color=COLORES['primario'], width=3),
-                marker=dict(size=8),
+                marker_color=COLORES['primario'],
+                text=[f"{v:.1f}" for v in df_media[metrica_evol]],
+                textposition='outside',
                 hovertemplate='<b>%{x|%d/%m/%Y}</b><br>' +
                              f'Media: %{{y:.1f}}<extra></extra>'
             ))
@@ -1365,19 +1451,13 @@ def main():
                         df_pos_media = df_pos.groupby('date')[metrica_evol].mean().reset_index()
                         df_pos_media = df_pos_media.sort_values('date')
                         
-                        if suavizado and len(df_pos_media) >= 3:
-                            df_pos_media[f'{metrica_evol}_smooth'] = df_pos_media[metrica_evol].rolling(window=3, center=True).mean()
-                            y_data = df_pos_media[f'{metrica_evol}_smooth']
-                        else:
-                            y_data = df_pos_media[metrica_evol]
-                        
-                        fig.add_trace(go.Scatter(
+                        fig.add_trace(go.Bar(
                             x=df_pos_media['date'],
-                            y=y_data,
-                            mode='lines+markers',
+                            y=df_pos_media[metrica_evol],
                             name=pos,
-                            line=dict(color=colores_pos[pos], width=2),
-                            marker=dict(size=6),
+                            marker_color=colores_pos[pos],
+                            text=[f"{v:.1f}" for v in df_pos_media[metrica_evol]],
+                            textposition='outside',
                             hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{pos}: %{{y:.1f}}<extra></extra>'
                         ))
             except:
@@ -1390,13 +1470,12 @@ def main():
             for jugador in df_promedios.index:
                 df_jug = df_temporal[df_temporal['player'] == jugador].sort_values('date')
                 
-                fig.add_trace(go.Scatter(
+                fig.add_trace(go.Bar(
                     x=df_jug['date'],
                     y=df_jug[metrica_evol],
-                    mode='lines+markers',
                     name=jugador,
-                    line=dict(width=2),
-                    marker=dict(size=6),
+                    text=[f"{v:.1f}" for v in df_jug[metrica_evol]],
+                    textposition='outside',
                     hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{jugador}: %{{y:.1f}}<extra></extra>'
                 ))
         
@@ -1409,15 +1488,14 @@ def main():
             for jugador in jugadores:
                 df_jug = df_temporal[df_temporal['player'] == jugador].sort_values('date')
                 
-                fig.add_trace(go.Scatter(
+                fig.add_trace(go.Bar(
                     x=df_jug['date'],
                     y=df_jug[metrica_evol],
-                    mode='lines+markers',
                     name=jugador,
-                    line=dict(width=1),
-                    marker=dict(size=4),
+                    text=[f"{v:.0f}" for v in df_jug[metrica_evol]],
+                    textposition='outside',
                     hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{jugador}: %{{y:.1f}}<extra></extra>',
-                    opacity=0.6
+                    opacity=0.8
                 ))
         
         else:  # Selección manual
@@ -1426,15 +1504,21 @@ def main():
                     df_jug = df_temporal[df_temporal['player'] == jugador].sort_values('date')
                     
                     if len(df_jug) > 0:
-                        fig.add_trace(go.Scatter(
+                        fig.add_trace(go.Bar(
                             x=df_jug['date'],
                             y=df_jug[metrica_evol],
-                            mode='lines+markers',
                             name=jugador,
-                            line=dict(width=2),
-                            marker=dict(size=6),
+                            text=[f"{v:.1f}" for v in df_jug[metrica_evol]],
+                            textposition='outside',
                             hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{jugador}: %{{y:.1f}}<extra></extra>'
                         ))
+        
+        # Aplicar update_traces para texto
+        fig.update_traces(
+            textfont=dict(size=12, color='black'),
+            textposition='outside',
+            selector=dict(type='bar')
+        )
         
         # Layout del gráfico
         fig.update_layout(
@@ -1443,10 +1527,13 @@ def main():
             yaxis_title=metrica_evol_nombre,
             height=600,
             hovermode='x unified',
+            barmode='group',
             xaxis=dict(
                 tickformat='%d/%m',
                 tickangle=-45
-            )
+            ),
+            uniformtext_minsize=11,
+            uniformtext_mode='show'
         )
         
         st.plotly_chart(fig, use_container_width=True)
@@ -1454,15 +1541,62 @@ def main():
         # Estadísticas de tendencia
         st.subheader("📊 Análisis de Tendencia")
         
-        # Calcular tendencia de la media del equipo
-        df_media_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
-        df_media_trend = df_media_trend.sort_values('date')
+        # Calcular tendencia según el tipo de visualización
+        if tipo_linea == 'Media del equipo':
+            # Media del equipo
+            df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
+            df_trend = df_trend.sort_values('date')
+            nombre_serie = "Media del equipo"
+            
+        elif tipo_linea == 'Por posición':
+            # Calcular tendencia promediando todas las posiciones
+            try:
+                df_plantilla = cargar_plantilla_europa()
+                df_temporal['posicion'] = df_temporal['player'].apply(
+                    lambda x: mapear_posicion(x, df_plantilla)
+                )
+                df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
+                df_trend = df_trend.sort_values('date')
+                nombre_serie = "Media de todas las posiciones"
+            except:
+                df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
+                df_trend = df_trend.sort_values('date')
+                nombre_serie = "Media del equipo"
+                
+        elif tipo_linea == 'Top 5 jugadores':
+            # Solo los Top 5 jugadores
+            df_promedios = df_temporal.groupby('player')[metrica_evol].mean().sort_values(ascending=False).head(5)
+            top5_jugadores = df_promedios.index.tolist()
+            df_temp_top5 = df_temporal[df_temporal['player'].isin(top5_jugadores)]
+            df_trend = df_temp_top5.groupby('date')[metrica_evol].mean().reset_index()
+            df_trend = df_trend.sort_values('date')
+            nombre_serie = f"Media Top 5: {', '.join(top5_jugadores)}"
+            
+        elif tipo_linea == 'Selección manual':
+            # Solo los jugadores seleccionados
+            if jugadores_seleccionados_evol and len(jugadores_seleccionados_evol) > 0:
+                df_temp_sel = df_temporal[df_temporal['player'].isin(jugadores_seleccionados_evol)]
+                df_trend = df_temp_sel.groupby('date')[metrica_evol].mean().reset_index()
+                df_trend = df_trend.sort_values('date')
+                nombre_serie = f"Media seleccionados: {', '.join(jugadores_seleccionados_evol)}"
+            else:
+                df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
+                df_trend = df_trend.sort_values('date')
+                nombre_serie = "Media del equipo"
+                
+        else:  # Todos los jugadores
+            df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
+            df_trend = df_trend.sort_values('date')
+            nombre_serie = "Media de todos los jugadores"
         
-        if len(df_media_trend) >= 2:
-            valor_inicial = df_media_trend[metrica_evol].iloc[0]
-            valor_final = df_media_trend[metrica_evol].iloc[-1]
+        if len(df_trend) >= 2:
+            valor_inicial = df_trend[metrica_evol].iloc[0]
+            valor_final = df_trend[metrica_evol].iloc[-1]
             cambio = valor_final - valor_inicial
             cambio_pct = (cambio / valor_inicial * 100) if valor_inicial != 0 else 0
+            
+            # Mostrar de qué jugadores se calcula la tendencia
+            st.caption(f"📍 Calculado sobre: **{nombre_serie}**")
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -1470,14 +1604,16 @@ def main():
                 st.metric(
                     "Valor Inicial",
                     f"{valor_inicial:.1f}",
-                    delta=None
+                    delta=None,
+                    help=f"Fecha: {df_trend['date'].iloc[0].strftime('%d/%m/%Y')}"
                 )
             
             with col2:
                 st.metric(
                     "Valor Actual",
                     f"{valor_final:.1f}",
-                    delta=None
+                    delta=None,
+                    help=f"Fecha: {df_trend['date'].iloc[-1].strftime('%d/%m/%Y')}"
                 )
             
             with col3:

@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import sys
 from pathlib import Path
-
+import os
 # Añadir directorio raíz al path
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
@@ -346,6 +346,218 @@ def main():
             
             st.plotly_chart(fig, use_container_width=True)
             
+            # ========================================
+            # EXPORTAR A PDF
+            # ========================================
+            
+            st.markdown("---")
+            st.subheader("📄 Exportar Informe a PDF")
+            
+            col_pdf1, col_pdf2, col_pdf3 = st.columns([2, 2, 1])
+            
+            with col_pdf1:
+                metricas_pdf = st.multiselect(
+                    "Métricas a incluir:",
+                    options=list(METRICAS_DICT.keys()),
+                    default=[metrica_nombre],
+                    key='metricas_pdf',
+                    help="Selecciona las métricas para el informe"
+                )
+            
+            with col_pdf2:
+                modo_jugadores_pdf = st.radio(
+                    "Jugadores:",
+                    options=['Solo jugador actual', 'Selección múltiple'],
+                    key='modo_jugadores_pdf',
+                    horizontal=True
+                )
+                
+                if modo_jugadores_pdf == 'Selección múltiple':
+                    jugadores_pdf = st.multiselect(
+                        "Seleccionar jugadores:",
+                        options=jugadores,
+                        default=[jugador_seleccionado],
+                        key='jugadores_pdf',
+                        help="Máximo 5 jugadores"
+                    )
+                else:
+                    jugadores_pdf = [jugador_seleccionado]
+            
+            with col_pdf3:
+                st.write("")  # Espaciado
+                st.write("")
+                if st.button("🔽 Generar PDF", type="primary", use_container_width=True):
+                    if len(metricas_pdf) == 0:
+                        st.error("⚠️ Selecciona al menos 1 métrica")
+                    elif len(jugadores_pdf) == 0:
+                        st.error("⚠️ Selecciona al menos 1 jugador")
+                    else:
+                        with st.spinner("Generando PDF..."):
+                            try:
+                                # Preparar datos para cada jugador
+                                jugadores_datos = []
+                                
+                                for jugador in jugadores_pdf:
+                                    # Obtener datos del jugador
+                                    df_jugador_pdf = df_rango[df_rango['player'] == jugador].copy()
+                                    posicion_pdf = mapear_posicion(jugador, df_plantilla) if df_plantilla is not None else 'Sin posición'
+                                    
+                                    # Calcular stats para cada métrica
+                                    stats_jugador = {}
+                                    for metrica_nombre_pdf in metricas_pdf:
+                                        metrica_col_pdf = METRICAS_DICT[metrica_nombre_pdf]
+                                        
+                                        media_val = df_jugador_pdf[metrica_col_pdf].mean()
+                                        mejor_val = df_jugador_pdf[metrica_col_pdf].max()
+                                        peor_val = df_jugador_pdf[metrica_col_pdf].min()
+                                        
+                                        # vs Ref. Equipo
+                                        vs_ref = 0
+                                        if df_referencias is not None:
+                                            ref = obtener_referencia_metrica(df_referencias, metrica_col_pdf)
+                                            if ref is not None and isinstance(ref, dict) and 'Media' in ref:
+                                                vs_ref = media_val - ref['Media']
+                                        
+                                        stats_jugador[metrica_col_pdf] = {
+                                            'media': media_val,
+                                            'mejor': mejor_val,
+                                            'peor': peor_val,
+                                            'vs_ref': vs_ref
+                                        }
+                                    
+                                    # Preparar un df_completo POR CADA MÉTRICA
+                                    df_completos_por_metrica = {}
+                                    
+                                    for metrica_nombre_pdf in metricas_pdf:
+                                        metrica_col_pdf = METRICAS_DICT[metrica_nombre_pdf]
+                                        
+                                        # Crear df_completo para esta métrica
+                                        todos_partidos_pdf = df_rango[['date', 'session']].drop_duplicates().sort_values('date')
+                                        df_completo_metrica = todos_partidos_pdf.copy()
+                                        df_completo_metrica['jugador'] = jugador
+                                        
+                                        # Merge con datos del jugador para esta métrica
+                                        merge_cols = ['date', metrica_col_pdf, 'time']
+                                        df_completo_metrica = df_completo_metrica.merge(
+                                            df_jugador_pdf[merge_cols],
+                                            on='date',
+                                            how='left'
+                                        )
+                                        
+                                        # Calcular estadística acumulada del jugador
+                                        df_completo_metrica['valor_acum_jugador'] = None
+                                        valores_jugados_pdf = []
+                                        
+                                        for idx, row in df_completo_metrica.iterrows():
+                                            if pd.notna(row[metrica_col_pdf]):
+                                                valores_jugados_pdf.append(row[metrica_col_pdf])
+                                            
+                                            if len(valores_jugados_pdf) > 0:
+                                                if estadistica_jugador == 'Media':
+                                                    val = pd.Series(valores_jugados_pdf).mean()
+                                                elif estadistica_jugador == 'Mediana':
+                                                    val = pd.Series(valores_jugados_pdf).median()
+                                                elif estadistica_jugador == 'P70':
+                                                    val = pd.Series(valores_jugados_pdf).quantile(0.70)
+                                                elif estadistica_jugador == 'P75':
+                                                    val = pd.Series(valores_jugados_pdf).quantile(0.75)
+                                                elif estadistica_jugador == 'P80':
+                                                    val = pd.Series(valores_jugados_pdf).quantile(0.80)
+                                                elif estadistica_jugador == 'P85':
+                                                    val = pd.Series(valores_jugados_pdf).quantile(0.85)
+                                                elif estadistica_jugador == 'P90':
+                                                    val = pd.Series(valores_jugados_pdf).quantile(0.90)
+                                                elif estadistica_jugador == 'P95':
+                                                    val = pd.Series(valores_jugados_pdf).quantile(0.95)
+                                                
+                                                df_completo_metrica.at[idx, 'valor_acum_jugador'] = val
+                                        
+                                        # Calcular estadística acumulada de la posición
+                                        df_completo_metrica['valor_acum_posicion'] = None
+                                        
+                                        if posicion_pdf not in ['Sin posición', None, ''] and df_plantilla is not None:
+                                            try:
+                                                jugadores_posicion_pdf = df_plantilla[
+                                                    df_plantilla['Posición'] == posicion_pdf
+                                                ]['Jugador GPS'].tolist()
+                                                
+                                                df_posicion_pdf = df_rango[df_rango['player'].isin(jugadores_posicion_pdf)].copy()
+                                                
+                                                if len(df_posicion_pdf) > 0:
+                                                    for fecha in todos_partidos_pdf['date']:
+                                                        df_hasta_fecha_pdf = df_posicion_pdf[df_posicion_pdf['date'] <= fecha]
+                                                        
+                                                        if len(df_hasta_fecha_pdf) > 0:
+                                                            valores_pos = df_hasta_fecha_pdf[metrica_col_pdf].dropna()
+                                                            
+                                                            if len(valores_pos) > 0:
+                                                                if estadistica_posicion == 'Media':
+                                                                    valor_pos_pdf = valores_pos.mean()
+                                                                elif estadistica_posicion == 'Mediana':
+                                                                    valor_pos_pdf = valores_pos.median()
+                                                                elif estadistica_posicion == 'P70':
+                                                                    valor_pos_pdf = valores_pos.quantile(0.70)
+                                                                elif estadistica_posicion == 'P75':
+                                                                    valor_pos_pdf = valores_pos.quantile(0.75)
+                                                                elif estadistica_posicion == 'P80':
+                                                                    valor_pos_pdf = valores_pos.quantile(0.80)
+                                                                elif estadistica_posicion == 'P85':
+                                                                    valor_pos_pdf = valores_pos.quantile(0.85)
+                                                                elif estadistica_posicion == 'P90':
+                                                                    valor_pos_pdf = valores_pos.quantile(0.90)
+                                                                elif estadistica_posicion == 'P95':
+                                                                    valor_pos_pdf = valores_pos.quantile(0.95)
+                                                                
+                                                                df_completo_metrica.loc[df_completo_metrica['date'] == fecha, 'valor_acum_posicion'] = valor_pos_pdf
+                                            except:
+                                                pass
+                                        
+                                        # Guardar df_completo para esta métrica
+                                        df_completos_por_metrica[metrica_col_pdf] = df_completo_metrica
+                                    
+                                    # Obtener foto
+                                    from utils.visualizations import obtener_foto_jugador
+                                    foto_path_pdf = obtener_foto_jugador(jugador)
+                                    
+                                    jugadores_datos.append({
+                                        'nombre': jugador,
+                                        'posicion': posicion_pdf,
+                                        'foto_path': foto_path_pdf,
+                                        'stats': stats_jugador,
+                                        'df_completos_por_metrica': df_completos_por_metrica
+                                    })
+                                
+                                # Generar PDF
+                                from utils.pdf_evolucion_individual import generar_pdf_evolucion_individual
+                                
+                                pdf_path = generar_pdf_evolucion_individual(
+                                    jugadores_datos=jugadores_datos,
+                                    metricas_seleccionadas=[METRICAS_DICT[m] for m in metricas_pdf],
+                                    estadistica_jugador=estadistica_jugador,
+                                    estadistica_posicion=estadistica_posicion,
+                                    fecha_desde=fecha_desde,
+                                    fecha_hasta=fecha_hasta,
+                                    df_rango=df_rango,
+                                    METRICAS_DICT=METRICAS_DICT,
+                                    COLORES=COLORES
+                                )
+                                
+                                st.success("✅ PDF generado correctamente!")
+                                
+                                # Botón de descarga
+                                with open(pdf_path, 'rb') as f:
+                                    st.download_button(
+                                        label="📥 Descargar PDF",
+                                        data=f,
+                                        file_name=os.path.basename(pdf_path),
+                                        mime='application/pdf'
+                                    )
+                                
+                            except Exception as e:
+                                st.error(f"❌ Error al generar PDF: {str(e)}")
+                                st.exception(e)
+
+
             # Info adicional
             partidos_totales = len(todos_partidos)
             partidos_jugados = len(df_jugador)
@@ -406,22 +618,24 @@ def main():
             # Filtrar jugadores seleccionados
             df_comparativa = df_partido[df_partido['player'].isin(jugadores_comparar)].copy()
             
-            # Gráfico comparativo
+            # Gráfico comparativo (BARRAS)
             fig = go.Figure()
-            
+
             for jugador in jugadores_comparar:
                 df_jug = df_rango[df_rango['player'] == jugador].copy()
                 df_jug = df_jug.sort_values('date')
                 
-                fig.add_trace(go.Scatter(
+                fig.add_trace(go.Bar(
                     x=df_jug['date'],
                     y=df_jug[metrica_col],
-                    mode='lines+markers',
                     name=jugador,
-                    line=dict(width=2),
-                    marker=dict(size=8)
+                    text=[f"{v:.0f}" for v in df_jug[metrica_col]],  # Sin decimales
+                    textposition='outside',
+                    hovertemplate='<b>%{x|%d/%m/%Y}</b><br>' +
+                                f'{metrica_nombre}: %{{y:.1f}}<br>' +
+                                '<extra></extra>'
                 ))
-            
+
             # Línea de referencia
             if df_referencias is not None:
                 ref = obtener_referencia_metrica(df_referencias, metrica_col)
@@ -432,15 +646,23 @@ def main():
                         line_color=COLORES['referencia'],
                         annotation_text="Ref. 94min"
                     )
-            
+
+            # ← AÑADIR ESTO (CRÍTICO)
+            fig.update_traces(
+                textfont=dict(size=22, color='black', family='Arial Black'),
+                textposition='outside',
+                selector=dict(type='bar')
+            )
+
             fig.update_layout(
                 title=f"Comparativa de {metrica_nombre}",
                 xaxis_title="Fecha",
                 yaxis_title=metrica_nombre,
-                height=500,
-                hovermode='x unified'
+                height=650,  # ← AUMENTADO
+                hovermode='x unified',
+                barmode='group'
             )
-            
+
             st.plotly_chart(fig, use_container_width=True)
             
             # Tabla comparativa

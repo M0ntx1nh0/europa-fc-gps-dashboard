@@ -2,7 +2,8 @@
 Módulo de utilidades para la aplicación Europa FC GPS
 """
 
-from .data_loader import cargar_datos_csv, validar_columnas, obtener_info_dataset
+from .data_loader import validar_columnas
+from .drive_loader import cargar_datos_desde_drive, cargar_plantilla_desde_drive, obtener_info_dataset
 from .data_processor import (
     procesar_datos, 
     convertir_tiempo_a_minutos,
@@ -37,6 +38,9 @@ from .plantilla import (
     obtener_jugadores_por_posicion,
     verificar_plantilla
 )
+
+from .pdf_evolucion_individual import generar_pdf_evolucion_individual
+
 
 __all__ = [
     # data_loader
