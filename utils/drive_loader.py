@@ -17,7 +17,8 @@ FOLDER_IDS = {
     'datos': '18Nve5WnlrNTGs2LGuzhpEldbVMuLUwH_',
     'fotos_jugadores': '1IZxw0TkG8d82UjteI5L5cRe78i-QFiey',
     'plantilla': '1YEmQ57mtxXSg-6TEDiS1BrSQNyjMm9Kj',
-    'referencias_94min': '1oG5gTFjFgSc-CNvS0rpzY2UaG8KNeQJ3'
+    'referencias_94min': '1oG5gTFjFgSc-CNvS0rpzY2UaG8KNeQJ3',
+    'usuarios': '1Rc3BIqAxedY-ybXDPwrePRFPTEUvlvKk'  # ← AÑADIR ESTA LÍNEA
 }
 
 
@@ -265,3 +266,56 @@ def obtener_info_dataset(df):
     }
     
     return info
+
+@st.cache_data(ttl=300)
+def cargar_usuarios_desde_drive():
+    """
+    Carga el archivo de usuarios autorizados desde Drive
+    
+    Returns:
+        pd.DataFrame: DataFrame con usuarios autorizados
+    """
+    drive = autenticar_google_drive()
+    
+    if drive is None:
+        return None
+    
+    folder_id = FOLDER_IDS.get('usuarios', None)
+    
+    if not folder_id:
+        st.error("❌ No se ha configurado la carpeta de usuarios")
+        return None
+    
+    archivos = listar_archivos_carpeta(drive, folder_id, patron='*.csv')
+    
+    if not archivos:
+        st.warning("⚠️ No se encontró archivo de usuarios en Drive")
+        return None
+    
+    archivo = archivos[0]
+    
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as tmp_file:
+            archivo.GetContentFile(tmp_file.name)
+            
+            # Leer CSV con detección automática de separador y sin BOM
+            df_usuarios = pd.read_csv(
+                tmp_file.name, 
+                encoding='utf-8-sig',  # Elimina BOM automáticamente
+                sep=None,              # Detecta automáticamente , o ;
+                engine='python'        # Necesario para sep=None
+            )
+            os.unlink(tmp_file.name)
+        
+        # Validar columnas requeridas
+        columnas_requeridas = ['nombre', 'usuario', 'contraseña', 'rol']
+        if not all(col in df_usuarios.columns for col in columnas_requeridas):
+            st.error(f"❌ El archivo de usuarios debe tener las columnas: {columnas_requeridas}")
+            st.error(f"❌ Pero tiene: {df_usuarios.columns.tolist()}")
+            return None
+        
+        return df_usuarios
+        
+    except Exception as e:
+        st.error(f"❌ Error cargando usuarios: {str(e)}")
+        return None

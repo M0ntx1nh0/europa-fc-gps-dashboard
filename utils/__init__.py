@@ -27,10 +27,8 @@ from .visualizations import (
     calcular_promedio_ultimos_partidos,
     obtener_foto_jugador
 )
-from .sidebar import (
-    render_sidebar,
-    inicializar_session_state
-)
+from .sidebar import render_sidebar
+
 from .plantilla import (
     cargar_plantilla_europa,
     mapear_posicion,
@@ -41,12 +39,23 @@ from .plantilla import (
 
 from .pdf_evolucion_individual import generar_pdf_evolucion_individual
 
+from .auth import (
+    mostrar_login,
+    cerrar_sesion,
+    mostrar_info_usuario
+)
+
+from .filtros import render_filtro_partidos
+
+# ← ELIMINADA LÍNEA: from utils.proteccion import inicializar_pagina
 
 __all__ = [
     # data_loader
-    'cargar_datos_csv',
     'validar_columnas',
     'obtener_info_dataset',
+    # drive_loader
+    'cargar_datos_desde_drive',
+    'cargar_plantilla_desde_drive',
     # data_processor
     'procesar_datos',
     'convertir_tiempo_a_minutos',
@@ -69,11 +78,18 @@ __all__ = [
     'obtener_foto_jugador',
     # sidebar
     'render_sidebar',
-    'inicializar_session_state',
+    # filtros
+    'render_filtro_partidos',
     # plantilla
     'cargar_plantilla_europa',
     'mapear_posicion',
     'obtener_info_jugador',
     'obtener_jugadores_por_posicion',
-    'verificar_plantilla'
+    'verificar_plantilla',
+    # auth
+    'mostrar_login',
+    'cerrar_sesion',
+    'mostrar_info_usuario',
+    # pdf
+    'generar_pdf_evolucion_individual'
 ]

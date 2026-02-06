@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import sys
 from pathlib import Path
 import os
+
 # Añadir directorio raíz al path
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
@@ -16,32 +17,70 @@ from config import PAGE_TITLE, PAGE_ICON, LAYOUT, METRICAS_DICT, COLORES
 from utils import (calcular_referencias_normalizadas, filtrar_por_fechas,
                    filtrar_por_partido, obtener_referencia_metrica,
                    calcular_z_score, clasificar_rendimiento, render_sidebar)
+from utils.filtros import render_filtro_partidos
 
 # Configuración
 st.set_page_config(
     page_title=f"{PAGE_TITLE} - Individual",
     page_icon=PAGE_ICON,
-    layout=LAYOUT
+    layout=LAYOUT,
+    initial_sidebar_state="collapsed"
 )
 
 def main():
-    # Renderizar sidebar común
+    # ==========================================
+    # VERIFICAR AUTENTICACIÓN
+    # ==========================================
+    if not st.session_state.get('autenticado', False):
+        st.warning("⚠️ Por favor, inicia sesión desde la página principal")
+        st.info("👉 Ve a la app principal para iniciar sesión")
+        st.stop()
+    
+    # ==========================================
+    # RENDERIZAR SIDEBAR
+    # ==========================================
     render_sidebar()
     
     st.title("👤 Análisis Individual")
     
-    # Verificar datos
+    # ==========================================
+    # VERIFICAR DATOS CARGADOS
+    # ==========================================
     if not st.session_state.get('datos_cargados', False):
-        st.warning("⚠️ No hay datos cargados. Por favor, carga los datos desde la página principal.")
+        st.warning("⚠️ No hay datos cargados")
+        st.info("💡 Ve a la página principal y carga los datos desde Google Drive")
         st.stop()
     
-    # Obtener datos
-    df = st.session_state.df_procesado
-    fecha_desde = st.session_state.get('fecha_desde')
-    fecha_hasta = st.session_state.get('fecha_hasta')
-    partido_seleccionado = st.session_state.get('partido_seleccionado')
+    # ==========================================
+    # OBTENER DATOS DE FORMA SEGURA
+    # ==========================================
+    df = st.session_state.get('df_procesado')
     
-    # SELECTOR DE MÉTRICA (ahora en la página)
+    if df is None or len(df) == 0:
+        st.error("⚠️ Error: datos no disponibles")
+        st.stop()
+    
+    # ========================================
+    # SISTEMA DE FILTROS DE PARTIDOS
+    # ========================================
+    
+    # Renderizar filtros (retorna: df_filtrado, modo_partido, info_dict)
+    df_filtrado, modo_partido, info_dict = render_filtro_partidos(
+        df=df,
+        titulo="🎯 Filtros de Análisis"
+    )
+    
+    # Verificar que hay datos filtrados
+    if df_filtrado is None or len(df_filtrado) == 0:
+        st.error("❌ No hay datos en el rango seleccionado")
+        st.stop()
+    
+    st.markdown("---")
+    
+    # ========================================
+    # SELECTOR DE MÉTRICA
+    # ========================================
+    
     st.markdown("### 📊 Configuración de Análisis")
     metrica_nombre = st.selectbox(
         "Selecciona la métrica a analizar:",
@@ -51,31 +90,16 @@ def main():
     metrica_col = METRICAS_DICT[metrica_nombre]
     
     st.markdown("---")
+
+    # ========================================
+    # CALCULAR REFERENCIAS CON DATOS FILTRADOS
+    # ========================================
     
-    # Filtrar datos
-    df_rango = filtrar_por_fechas(df, fecha_desde, fecha_hasta)
-    df_partido = filtrar_por_partido(df_rango, partido_seleccionado)
+    df_referencias = calcular_referencias_normalizadas(df_filtrado)
     
-    if len(df_partido) == 0:
-        st.error("❌ No hay datos para el partido seleccionado")
-        st.stop()
-    
-    # Header
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("⚽ Partido", df_partido['session'].iloc[0])
-    with col2:
-        st.metric("📅 Fecha", partido_seleccionado.strftime('%d/%m/%Y'))
-    with col3:
-        st.metric("👥 Jugadores", len(df_partido))
-    with col4:
-        st.metric("📊 Métrica", metrica_nombre)
-    
-    st.markdown("---")
-    
-    # Calcular referencias
-    df_referencias = calcular_referencias_normalizadas(df_rango)
+    # ========================================
+    # TABS
+    # ========================================
     
     # Tabs
     tab1, tab2 = st.tabs(["📈 Evolución Individual", "🎯 Comparativa"])
@@ -88,7 +112,7 @@ def main():
         col_foto, col_jug, col_stat_jug, col_stat_pos = st.columns([0.5, 2, 1, 1])
         
         with col_jug:
-            jugadores = sorted(df_rango['player'].unique())
+            jugadores = sorted(df_filtrado['player'].dropna().astype(str).unique())
             jugador_seleccionado = st.selectbox(
                 "👤 Seleccionar jugador:",
                 options=jugadores,
@@ -99,7 +123,7 @@ def main():
             estadistica_jugador = st.selectbox(
                 "📊 Línea jugador:",
                 options=['Media', 'Mediana', 'P70', 'P75', 'P80', 'P85', 'P90', 'P95'],
-                index=0,  # Media por defecto
+                index=0,
                 key='stat_jugador',
                 help="Estadística acumulada del jugador"
             )
@@ -108,7 +132,7 @@ def main():
             estadistica_posicion = st.selectbox(
                 "📍 Línea posición:",
                 options=['Media', 'Mediana', 'P70', 'P75', 'P80', 'P85', 'P90', 'P95'],
-                index=0,  # Media por defecto
+                index=0,
                 key='stat_posicion',
                 help="Estadística acumulada de jugadores de su posición"
             )
@@ -128,8 +152,11 @@ def main():
             posicion_jugador = 'Sin posición'
             df_plantilla = None
         
-        # Filtrar datos del jugador
-        df_jugador = df_rango[df_rango['player'] == jugador_seleccionado].copy()
+        # CRÍTICO: Filtrar datos del jugador Y eliminar duplicados
+        df_jugador = df_filtrado[df_filtrado['player'] == jugador_seleccionado].copy()
+        
+        # Eliminar duplicados por fecha (tomar el registro con más minutos jugados)
+        df_jugador = df_jugador.sort_values('time', ascending=False).drop_duplicates(subset=['date'], keep='first')
         df_jugador = df_jugador.sort_values('date')
         
         if len(df_jugador) > 0:
@@ -139,11 +166,18 @@ def main():
             with col1:
                 st.metric("Posición", posicion_jugador)
             with col2:
-                st.metric(f"Media {metrica_nombre}", f"{df_jugador[metrica_col].mean():.2f}")
+                # Verificar que la métrica existe
+                if metrica_col in df_jugador.columns:
+                    st.metric(f"Media {metrica_nombre}", f"{df_jugador[metrica_col].mean():.2f}")
+                else:
+                    st.metric(f"Media {metrica_nombre}", "N/A")
             with col3:
-                st.metric(f"Mejor", f"{df_jugador[metrica_col].max():.2f}")
+                if metrica_col in df_jugador.columns:
+                    st.metric(f"Mejor", f"{df_jugador[metrica_col].max():.2f}")
+                else:
+                    st.metric(f"Mejor", "N/A")
             with col4:
-                if df_referencias is not None:
+                if df_referencias is not None and metrica_col in df_jugador.columns:
                     ref = obtener_referencia_metrica(df_referencias, metrica_col)
                     if ref is not None and isinstance(ref, dict) and 'Media' in ref:
                         dif = df_jugador[metrica_col].mean() - ref['Media']
@@ -152,20 +186,29 @@ def main():
             
             st.markdown("---")
             
+            # CRÍTICO: Verificar que la métrica existe antes de continuar
+            if metrica_col not in df_jugador.columns:
+                st.error(f"❌ La métrica '{metrica_nombre}' no existe en los datos. Esta métrica puede ser calculada y no estar disponible en el conjunto de datos filtrado.")
+                st.stop()
+            
             # ========================================
             # PREPARAR DATOS PARA GRÁFICO
             # ========================================
             
-            # Obtener TODOS los partidos del rango (jugara o no)
-            todos_partidos = df_rango[['date', 'session']].drop_duplicates().sort_values('date')
+            # CRÍTICO: Obtener TODOS los partidos únicos del rango filtrado
+            todos_partidos = df_filtrado[['date', 'session']].drop_duplicates().sort_values('date')
             
             # Crear DataFrame completo con todos los partidos
             df_completo = todos_partidos.copy()
             df_completo['jugador'] = jugador_seleccionado
             
-            # Merge con datos del jugador
+            # Merge con datos del jugador (solo columnas que existen)
+            merge_cols = ['date', metrica_col, 'time']
+            # Filtrar solo columnas que existen
+            merge_cols = [col for col in merge_cols if col in df_jugador.columns]
+            
             df_completo = df_completo.merge(
-                df_jugador[['date', metrica_col, 'time']],
+                df_jugador[merge_cols],
                 on='date',
                 how='left'
             )
@@ -178,28 +221,28 @@ def main():
             
             valores_jugados = []
             for idx, row in df_completo.iterrows():
-                if pd.notna(row[metrica_col]):
-                    # Jugó este partido
+                if pd.notna(row.get(metrica_col)):
                     valores_jugados.append(row[metrica_col])
                 
-                # Calcular estadística acumulada con todos los valores hasta ahora
                 if len(valores_jugados) > 0:
                     if estadistica_jugador == 'Media':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).mean()
+                        val = pd.Series(valores_jugados).mean()
                     elif estadistica_jugador == 'Mediana':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).median()
+                        val = pd.Series(valores_jugados).median()
                     elif estadistica_jugador == 'P70':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).quantile(0.70)
+                        val = pd.Series(valores_jugados).quantile(0.70)
                     elif estadistica_jugador == 'P75':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).quantile(0.75)
+                        val = pd.Series(valores_jugados).quantile(0.75)
                     elif estadistica_jugador == 'P80':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).quantile(0.80)
+                        val = pd.Series(valores_jugados).quantile(0.80)
                     elif estadistica_jugador == 'P85':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).quantile(0.85)
+                        val = pd.Series(valores_jugados).quantile(0.85)
                     elif estadistica_jugador == 'P90':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).quantile(0.90)
+                        val = pd.Series(valores_jugados).quantile(0.90)
                     elif estadistica_jugador == 'P95':
-                        df_completo.at[idx, 'valor_acum_jugador'] = pd.Series(valores_jugados).quantile(0.95)
+                        val = pd.Series(valores_jugados).quantile(0.95)
+                    
+                    df_completo.at[idx, 'valor_acum_jugador'] = val
             
             # ========================================
             # CALCULAR ESTADÍSTICA ACUMULADA DE LA POSICIÓN
@@ -207,21 +250,19 @@ def main():
             
             df_completo['valor_acum_posicion'] = None
             
-            # Solo si tenemos plantilla y posición válida
             if posicion_jugador not in ['Sin posición', None, ''] and df_plantilla is not None:
                 try:
-                    # Obtener jugadores de la misma posición
                     jugadores_posicion = df_plantilla[
                         df_plantilla['Posición'] == posicion_jugador
                     ]['Jugador GPS'].tolist()
                     
-                    # Filtrar datos de jugadores de esa posición
-                    df_posicion = df_rango[df_rango['player'].isin(jugadores_posicion)].copy()
+                    df_posicion = df_filtrado[df_filtrado['player'].isin(jugadores_posicion)].copy()
                     
-                    if len(df_posicion) > 0:
-                        # Para cada partido, calcular estadística acumulada de la posición
+                    # Eliminar duplicados por jugador y fecha
+                    df_posicion = df_posicion.sort_values('time', ascending=False).drop_duplicates(subset=['player', 'date'], keep='first')
+                    
+                    if len(df_posicion) > 0 and metrica_col in df_posicion.columns:
                         for fecha in todos_partidos['date']:
-                            # Obtener valores de todos los jugadores de la posición hasta esta fecha
                             df_hasta_fecha = df_posicion[df_posicion['date'] <= fecha]
                             
                             if len(df_hasta_fecha) > 0:
@@ -247,7 +288,6 @@ def main():
                                     else:
                                         valor_pos = valores.mean()
                                     
-                                    # Asignar valor a ese partido
                                     df_completo.loc[df_completo['date'] == fecha, 'valor_acum_posicion'] = valor_pos
                 except Exception as e:
                     st.warning(f"⚠️ No se pudo calcular estadística de posición: {e}")
@@ -262,8 +302,7 @@ def main():
             df_jugo = df_completo[df_completo[metrica_col].notna()].copy()
             
             if len(df_jugo) > 0:
-                # Texto para barras (minutos jugados)
-                texto_barras = [f"{int(t)}'" for t in df_jugo['time']]
+                texto_barras = [f"{int(t)}'" for t in df_jugo['time']] if 'time' in df_jugo.columns else [""] * len(df_jugo)
                 
                 fig.add_trace(go.Bar(
                     x=df_jugo['date'],
@@ -279,7 +318,7 @@ def main():
                     opacity=0.7
                 ))
             
-            # 2. LÍNEA ACUMULADA DEL JUGADOR (continua)
+            # 2. LÍNEA ACUMULADA DEL JUGADOR
             df_con_acum_jug = df_completo[df_completo['valor_acum_jugador'].notna()].copy()
             
             if len(df_con_acum_jug) > 0:
@@ -294,7 +333,7 @@ def main():
                                   f'{estadistica_jugador}: %{{y:.1f}}<extra></extra>'
                 ))
             
-            # 3. LÍNEA ACUMULADA DE LA POSICIÓN (discontinua)
+            # 3. LÍNEA ACUMULADA DE LA POSICIÓN
             df_con_acum_pos = df_completo[df_completo['valor_acum_posicion'].notna()].copy()
             
             if len(df_con_acum_pos) > 0:
@@ -308,22 +347,6 @@ def main():
                                   f'{estadistica_posicion} {posicion_jugador}s: %{{y:.1f}}<extra></extra>'
                 ))
             
-            # 4. MARCAR PARTIDO SELECCIONADO
-            partido_jugador = df_completo[df_completo['date'] == partido_seleccionado]
-            if len(partido_jugador) > 0:
-                # Solo marcar si jugó
-                if pd.notna(partido_jugador[metrica_col].iloc[0]):
-                    fig.add_trace(go.Scatter(
-                        x=[partido_seleccionado],
-                        y=[partido_jugador[metrica_col].iloc[0]],
-                        mode='markers',
-                        name='Partido Actual',
-                        marker=dict(size=20, color='gold', symbol='star', 
-                                   line=dict(color='black', width=2)),
-                        showlegend=True
-                    ))
-            
-            # Configuración del layout
             fig.update_layout(
                 title=f"Evolución de {metrica_nombre} - {jugador_seleccionado} ({posicion_jugador})",
                 xaxis_title="Fecha del partido",
@@ -356,12 +379,15 @@ def main():
             col_pdf1, col_pdf2, col_pdf3 = st.columns([2, 2, 1])
             
             with col_pdf1:
+                # CRÍTICO: Solo mostrar métricas que existen en los datos
+                metricas_disponibles = [m for m in METRICAS_DICT.keys() if METRICAS_DICT[m] in df_filtrado.columns]
+                
                 metricas_pdf = st.multiselect(
                     "Métricas a incluir:",
-                    options=list(METRICAS_DICT.keys()),
-                    default=[metrica_nombre],
+                    options=metricas_disponibles,
+                    default=[metrica_nombre] if metrica_nombre in metricas_disponibles else metricas_disponibles[:1],
                     key='metricas_pdf',
-                    help="Selecciona las métricas para el informe"
+                    help="Solo métricas disponibles en los datos filtrados"
                 )
             
             with col_pdf2:
@@ -384,7 +410,7 @@ def main():
                     jugadores_pdf = [jugador_seleccionado]
             
             with col_pdf3:
-                st.write("")  # Espaciado
+                st.write("")
                 st.write("")
                 if st.button("🔽 Generar PDF", type="primary", use_container_width=True):
                     if len(metricas_pdf) == 0:
@@ -394,12 +420,13 @@ def main():
                     else:
                         with st.spinner("Generando PDF..."):
                             try:
-                                # Preparar datos para cada jugador
                                 jugadores_datos = []
                                 
                                 for jugador in jugadores_pdf:
-                                    # Obtener datos del jugador
-                                    df_jugador_pdf = df_rango[df_rango['player'] == jugador].copy()
+                                    # Filtrar y limpiar datos del jugador
+                                    df_jugador_pdf = df_filtrado[df_filtrado['player'] == jugador].copy()
+                                    df_jugador_pdf = df_jugador_pdf.sort_values('time', ascending=False).drop_duplicates(subset=['date'], keep='first')
+                                    
                                     posicion_pdf = mapear_posicion(jugador, df_plantilla) if df_plantilla is not None else 'Sin posición'
                                     
                                     # Calcular stats para cada métrica
@@ -407,11 +434,14 @@ def main():
                                     for metrica_nombre_pdf in metricas_pdf:
                                         metrica_col_pdf = METRICAS_DICT[metrica_nombre_pdf]
                                         
+                                        # Verificar que existe
+                                        if metrica_col_pdf not in df_jugador_pdf.columns:
+                                            continue
+                                        
                                         media_val = df_jugador_pdf[metrica_col_pdf].mean()
                                         mejor_val = df_jugador_pdf[metrica_col_pdf].max()
                                         peor_val = df_jugador_pdf[metrica_col_pdf].min()
                                         
-                                        # vs Ref. Equipo
                                         vs_ref = 0
                                         if df_referencias is not None:
                                             ref = obtener_referencia_metrica(df_referencias, metrica_col_pdf)
@@ -425,31 +455,34 @@ def main():
                                             'vs_ref': vs_ref
                                         }
                                     
-                                    # Preparar un df_completo POR CADA MÉTRICA
+                                    # Preparar df_completo por métrica
                                     df_completos_por_metrica = {}
                                     
                                     for metrica_nombre_pdf in metricas_pdf:
                                         metrica_col_pdf = METRICAS_DICT[metrica_nombre_pdf]
                                         
-                                        # Crear df_completo para esta métrica
-                                        todos_partidos_pdf = df_rango[['date', 'session']].drop_duplicates().sort_values('date')
+                                        # Verificar que existe
+                                        if metrica_col_pdf not in df_filtrado.columns:
+                                            continue
+                                        
+                                        todos_partidos_pdf = df_filtrado[['date', 'session']].drop_duplicates().sort_values('date')
                                         df_completo_metrica = todos_partidos_pdf.copy()
                                         df_completo_metrica['jugador'] = jugador
                                         
-                                        # Merge con datos del jugador para esta métrica
                                         merge_cols = ['date', metrica_col_pdf, 'time']
+                                        merge_cols = [col for col in merge_cols if col in df_jugador_pdf.columns]
+                                        
                                         df_completo_metrica = df_completo_metrica.merge(
                                             df_jugador_pdf[merge_cols],
                                             on='date',
                                             how='left'
                                         )
                                         
-                                        # Calcular estadística acumulada del jugador
                                         df_completo_metrica['valor_acum_jugador'] = None
                                         valores_jugados_pdf = []
                                         
                                         for idx, row in df_completo_metrica.iterrows():
-                                            if pd.notna(row[metrica_col_pdf]):
+                                            if pd.notna(row.get(metrica_col_pdf)):
                                                 valores_jugados_pdf.append(row[metrica_col_pdf])
                                             
                                             if len(valores_jugados_pdf) > 0:
@@ -472,7 +505,6 @@ def main():
                                                 
                                                 df_completo_metrica.at[idx, 'valor_acum_jugador'] = val
                                         
-                                        # Calcular estadística acumulada de la posición
                                         df_completo_metrica['valor_acum_posicion'] = None
                                         
                                         if posicion_pdf not in ['Sin posición', None, ''] and df_plantilla is not None:
@@ -481,9 +513,10 @@ def main():
                                                     df_plantilla['Posición'] == posicion_pdf
                                                 ]['Jugador GPS'].tolist()
                                                 
-                                                df_posicion_pdf = df_rango[df_rango['player'].isin(jugadores_posicion_pdf)].copy()
+                                                df_posicion_pdf = df_filtrado[df_filtrado['player'].isin(jugadores_posicion_pdf)].copy()
+                                                df_posicion_pdf = df_posicion_pdf.sort_values('time', ascending=False).drop_duplicates(subset=['player', 'date'], keep='first')
                                                 
-                                                if len(df_posicion_pdf) > 0:
+                                                if len(df_posicion_pdf) > 0 and metrica_col_pdf in df_posicion_pdf.columns:
                                                     for fecha in todos_partidos_pdf['date']:
                                                         df_hasta_fecha_pdf = df_posicion_pdf[df_posicion_pdf['date'] <= fecha]
                                                         
@@ -512,10 +545,8 @@ def main():
                                             except:
                                                 pass
                                         
-                                        # Guardar df_completo para esta métrica
                                         df_completos_por_metrica[metrica_col_pdf] = df_completo_metrica
                                     
-                                    # Obtener foto
                                     from utils.visualizations import obtener_foto_jugador
                                     foto_path_pdf = obtener_foto_jugador(jugador)
                                     
@@ -527,7 +558,6 @@ def main():
                                         'df_completos_por_metrica': df_completos_por_metrica
                                     })
                                 
-                                # Generar PDF
                                 from utils.pdf_evolucion_individual import generar_pdf_evolucion_individual
                                 
                                 pdf_path = generar_pdf_evolucion_individual(
@@ -535,16 +565,15 @@ def main():
                                     metricas_seleccionadas=[METRICAS_DICT[m] for m in metricas_pdf],
                                     estadistica_jugador=estadistica_jugador,
                                     estadistica_posicion=estadistica_posicion,
-                                    fecha_desde=fecha_desde,
-                                    fecha_hasta=fecha_hasta,
-                                    df_rango=df_rango,
+                                    fecha_desde=info_dict.get('fecha_inicio'),
+                                    fecha_hasta=info_dict.get('fecha_fin'),
+                                    df_rango=df_filtrado,
                                     METRICAS_DICT=METRICAS_DICT,
                                     COLORES=COLORES
                                 )
                                 
                                 st.success("✅ PDF generado correctamente!")
                                 
-                                # Botón de descarga
                                 with open(pdf_path, 'rb') as f:
                                     st.download_button(
                                         label="📥 Descargar PDF",
@@ -555,8 +584,8 @@ def main():
                                 
                             except Exception as e:
                                 st.error(f"❌ Error al generar PDF: {str(e)}")
-                                st.exception(e)
-
+                                import traceback
+                                st.code(traceback.format_exc())
 
             # Info adicional
             partidos_totales = len(todos_partidos)
@@ -572,13 +601,12 @@ def main():
             
             # Tabla de evolución
             with st.expander("📋 Ver tabla de evolución completa"):
-                # Preparar tabla
                 df_tabla_evol = df_completo[['date', 'session', 'time', metrica_col, 
                                              'valor_acum_jugador', 'valor_acum_posicion']].copy()
                 df_tabla_evol['date'] = df_tabla_evol['date'].dt.strftime('%d/%m/%Y')
                 df_tabla_evol['time'] = df_tabla_evol['time'].apply(
                     lambda x: f"{x:.0f}" if pd.notna(x) else "-"
-                )
+                ) if 'time' in df_tabla_evol.columns else "-"
                 df_tabla_evol[metrica_col] = df_tabla_evol[metrica_col].apply(
                     lambda x: f"{x:.1f}" if pd.notna(x) else "-"
                 )
@@ -605,8 +633,7 @@ def main():
     with tab2:
         st.subheader("🎯 Comparativa entre Jugadores")
         
-        # Selector múltiple de jugadores
-        jugadores = sorted(df_partido['player'].unique())
+        jugadores = sorted(df_filtrado['player'].dropna().astype(str).unique())
         jugadores_comparar = st.multiselect(
             "Seleccionar jugadores a comparar (máx. 5):",
             options=jugadores,
@@ -615,31 +642,34 @@ def main():
         )
         
         if len(jugadores_comparar) > 0:
-            # Filtrar jugadores seleccionados
-            df_comparativa = df_partido[df_partido['player'].isin(jugadores_comparar)].copy()
+            # Verificar que la métrica existe
+            if metrica_col not in df_filtrado.columns:
+                st.error(f"❌ La métrica '{metrica_nombre}' no existe en los datos filtrados.")
+                st.stop()
             
-            # Gráfico comparativo (BARRAS)
+            # Gráfico comparativo
             fig = go.Figure()
 
             for jugador in jugadores_comparar:
-                df_jug = df_rango[df_rango['player'] == jugador].copy()
+                df_jug = df_filtrado[df_filtrado['player'] == jugador].copy()
+                # Eliminar duplicados
+                df_jug = df_jug.sort_values('time', ascending=False).drop_duplicates(subset=['date'], keep='first')
                 df_jug = df_jug.sort_values('date')
                 
                 fig.add_trace(go.Bar(
                     x=df_jug['date'],
                     y=df_jug[metrica_col],
                     name=jugador,
-                    text=[f"{v:.0f}" for v in df_jug[metrica_col]],  # Sin decimales
+                    text=[f"{v:.0f}" for v in df_jug[metrica_col]],
                     textposition='outside',
                     hovertemplate='<b>%{x|%d/%m/%Y}</b><br>' +
                                 f'{metrica_nombre}: %{{y:.1f}}<br>' +
                                 '<extra></extra>'
                 ))
 
-            # Línea de referencia
             if df_referencias is not None:
                 ref = obtener_referencia_metrica(df_referencias, metrica_col)
-                if ref is not None:
+                if ref is not None and 'Media' in ref:
                     fig.add_hline(
                         y=ref['Media'],
                         line_dash="dash",
@@ -647,7 +677,6 @@ def main():
                         annotation_text="Ref. 94min"
                     )
 
-            # ← AÑADIR ESTO (CRÍTICO)
             fig.update_traces(
                 textfont=dict(size=22, color='black', family='Arial Black'),
                 textposition='outside',
@@ -658,20 +687,20 @@ def main():
                 title=f"Comparativa de {metrica_nombre}",
                 xaxis_title="Fecha",
                 yaxis_title=metrica_nombre,
-                height=650,  # ← AUMENTADO
+                height=650,
                 hovermode='x unified',
                 barmode='group'
             )
 
             st.plotly_chart(fig, use_container_width=True)
             
-            # Tabla comparativa
             st.markdown("---")
             st.subheader("📊 Estadísticas Comparativas")
             
             comparativa_stats = []
             for jugador in jugadores_comparar:
-                df_jug = df_rango[df_rango['player'] == jugador]
+                df_jug = df_filtrado[df_filtrado['player'] == jugador].copy()
+                df_jug = df_jug.drop_duplicates(subset=['date'], keep='first')
                 
                 stats = {
                     'Jugador': jugador,

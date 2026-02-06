@@ -1,6 +1,6 @@
 """
 Página Equipo - Análisis de Equipo
-v1.7 - Con filtros de posición, ordenamiento y sistema de colores
+v1.9 - Con selector de jornada arriba que controla todo
 """
 
 import streamlit as st
@@ -25,7 +25,8 @@ from utils import (calcular_referencias_normalizadas, filtrar_por_fechas,
 st.set_page_config(
     page_title=f"{PAGE_TITLE} - Equipo",
     page_icon=PAGE_ICON,
-    layout=LAYOUT
+    layout=LAYOUT,
+    initial_sidebar_state="collapsed"
 )
 
 def filtrar_por_posicion(df, posicion, df_plantilla):
@@ -87,14 +88,36 @@ def ordenar_jugadores(df, criterio):
 
 
 def main():
-    # Renderizar sidebar común
+    # ==========================================
+    # VERIFICAR AUTENTICACIÓN
+    # ==========================================
+    if not st.session_state.get('autenticado', False):
+        st.warning("⚠️ Por favor, inicia sesión desde la página principal")
+        st.info("👉 Ve a la app principal para iniciar sesión")
+        st.stop()
+    
+    # ==========================================
+    # RENDERIZAR SIDEBAR
+    # ==========================================
     render_sidebar()
     
     st.title("📊 Análisis de Equipo")
     
-    # Verificar datos
+    # ==========================================
+    # VERIFICAR DATOS CARGADOS
+    # ==========================================
     if not st.session_state.get('datos_cargados', False):
-        st.warning("⚠️ No hay datos cargados. Por favor, carga los datos desde la página principal.")
+        st.warning("⚠️ No hay datos cargados")
+        st.info("💡 Ve a la página principal y carga los datos desde Google Drive")
+        st.stop()
+    
+    # ==========================================
+    # OBTENER DATOS DE FORMA SEGURA
+    # ==========================================
+    df = st.session_state.get('df_procesado')
+    
+    if df is None or len(df) == 0:
+        st.error("⚠️ Error: datos no disponibles")
         st.stop()
     
     # Cargar plantilla Excel
@@ -104,17 +127,59 @@ def main():
         st.error(f"❌ Error al cargar plantilla: {e}")
         st.info("📋 Verifica que el archivo Excel exista en: /Users/macmontxinho/Desktop/Teams/Europa/Plantillas CE Europa.XLSX")
         df_plantilla = None
-    
-    # Obtener datos
-    df = st.session_state.df_procesado
+
+    # ==========================================
+    # OBTENER RANGO DE FECHAS DEL SIDEBAR
+    # ==========================================
     fecha_desde = st.session_state.get('fecha_desde')
     fecha_hasta = st.session_state.get('fecha_hasta')
-    partido_seleccionado = st.session_state.get('partido_seleccionado')
     
-    # Filtrar datos
+    # Validar que las fechas existen
+    if fecha_desde is None or fecha_hasta is None:
+        fecha_desde = df['date'].min()
+        fecha_hasta = df['date'].max()
+        st.session_state.fecha_desde = fecha_desde
+        st.session_state.fecha_hasta = fecha_hasta
+    
+    # Filtrar datos por rango de fechas
     df_rango = filtrar_por_fechas(df, fecha_desde, fecha_hasta)
-    df_partido = filtrar_por_partido(df_rango, partido_seleccionado)
     
+    # ========================================
+    # SELECTOR DE PARTIDO (ARRIBA DEL TODO)
+    # ========================================
+    
+    st.markdown("## 📅 Selección de Partido")
+    
+    # Obtener lista de partidos disponibles en el rango
+    partidos_disponibles = sorted(df_rango['date'].unique(), reverse=True)
+    
+    # Crear opciones con formato
+    opciones_partidos = {
+        fecha: f"{pd.to_datetime(fecha).strftime('%d/%m/%Y')} - {df_rango[df_rango['date']==fecha]['session'].iloc[0]}"
+        for fecha in partidos_disponibles
+    }
+    
+    col_selector, col_info = st.columns([3, 1])
+    
+    with col_selector:
+        # Selector de partido
+        partido_seleccionado = st.selectbox(
+            "📆 Seleccionar partido a analizar:",
+            options=partidos_disponibles,
+            format_func=lambda x: opciones_partidos[x],
+            index=0,  # Por defecto, el más reciente
+            key='partido_seleccionado_equipo',
+            help="Este partido se usará tanto en el dashboard como en las tabs"
+        )
+    
+    with col_info:
+        # Info rápida
+        df_partido = filtrar_por_partido(df_rango, partido_seleccionado)
+        st.metric("👥 Jugadores", len(df_partido))
+    
+    st.markdown("---")
+    
+    # Verificar que hay datos para el partido seleccionado
     if len(df_partido) == 0:
         st.error("❌ No hay datos para el partido seleccionado")
         st.stop()
@@ -137,7 +202,7 @@ def main():
             options=[3, 5, 10],
             format_func=lambda x: f"{x} partidos",
             key='n_partidos_dashboard',
-            help="Número de partidos a promediar"
+            help="Número de partidos a promediar para las player cards"
         )
     
     with col2:
@@ -165,7 +230,7 @@ def main():
         referencia_color = st.selectbox(
             "Colorear vs:",
             options=['Media', 'Mediana', 'P70', 'P75', 'P80', 'P85', 'P90', 'P95'],
-            index=0,  # Media por defecto
+            index=0,
             key='ref_color',
             help="Referencia para colorear métricas"
         )
@@ -176,12 +241,11 @@ def main():
     
     with st.expander("ℹ️ **Ayuda: ¿Cómo funcionan los filtros y colores?**", expanded=False):
         
-        # Sección: Filtros
         st.markdown("""
         ### 📊 **GUÍA DE FILTROS**
         
         #### 🏆 **Promediar últimos:**
-        Calcula el promedio de las métricas usando los últimos N partidos.
+        Calcula el promedio de las métricas usando los últimos N partidos DESDE el partido seleccionado hacia atrás.
         - **3 partidos**: Tendencia más reciente
         - **5 partidos**: Balance entre reciente y estabilidad
         - **10 partidos**: Visión más estable de rendimiento
@@ -208,7 +272,6 @@ def main():
         
         st.markdown("---")
         
-        # Sección: Referencias
         st.markdown("""
         ### 🎯 **¿QUÉ SIGNIFICA CADA REFERENCIA?**
         
@@ -230,7 +293,6 @@ def main():
         
         st.markdown("---")
         
-        # Sección: Sistema de colores
         st.markdown("""
         ### 🎨 **SISTEMA DE COLORES (4 NIVELES)**
         
@@ -263,7 +325,6 @@ def main():
         
         st.markdown("---")
         
-        # Sección: Ejemplos prácticos
         st.markdown(f"""
         ### 📊 **EJEMPLOS PRÁCTICOS**
         
@@ -272,7 +333,6 @@ def main():
         Imagina que un jugador tiene **280m de HSR** en un partido:
         """)
         
-        # Tabla de ejemplos
         ejemplo_data = {
             'Referencia': ['Media', 'Media', 'P90', 'P90', 'P95'],
             'Valor Ref.': ['250m', '250m', '350m', '350m', '380m'],
@@ -314,7 +374,7 @@ def main():
         st.info("💡 **Recuerda:** Los colores son relativos al equipo y rango de fechas. No hay colores 'malos', solo información sobre dónde está cada jugador respecto a la referencia elegida.")
     
     # ========================================
-    # APLICAR FILTROS
+    # APLICAR FILTROS Y AGRUPAR POR JUGADOR
     # ========================================
     
     # Filtrar por posición
@@ -322,20 +382,53 @@ def main():
         df_partido_filtrado = filtrar_por_posicion(df_partido, posicion_filtro, df_plantilla)
         df_rango_filtrado = filtrar_por_posicion(df_rango, posicion_filtro, df_plantilla)
     else:
-        df_partido_filtrado = df_partido
-        df_rango_filtrado = df_rango
+        df_partido_filtrado = df_partido.copy()
+        df_rango_filtrado = df_rango.copy()
     
-    # Verificar si hay jugadores después del filtro
-    if len(df_partido_filtrado) == 0:
+    # CRÍTICO: AGRUPAR POR JUGADOR para eliminar duplicados
+    # Esto asegura que cada jugador aparezca solo UNA vez
+    
+    # Mapeo de estadísticos a funciones de agregación
+    estadistico_map = {
+        'Media': 'mean',
+        'Mediana': 'median',
+        'Máximo': 'max',
+        'Mínimo': 'min',
+        'P70': lambda x: x.quantile(0.70),
+        'P75': lambda x: x.quantile(0.75),
+        'P80': lambda x: x.quantile(0.80),
+        'P85': lambda x: x.quantile(0.85),
+        'P90': lambda x: x.quantile(0.90),
+        'P95': lambda x: x.quantile(0.95)
+    }
+    
+    agg_func = estadistico_map.get(referencia_color, 'mean')
+    
+    # Crear diccionario de agregación solo para columnas existentes
+    metricas_cols = list(METRICAS_DICT.values())
+    agg_dict = {col: agg_func for col in metricas_cols if col in df_partido_filtrado.columns}
+    agg_dict['time'] = 'mean'  # Tiempo promedio
+    
+    # Verificar si 'position' existe antes de agregarlo
+    if 'position' in df_partido_filtrado.columns:
+        agg_dict['position'] = 'first'  # Posición (tomar la primera)
+    
+    df_partido_agrupado = df_partido_filtrado.groupby('player').agg(agg_dict).reset_index()
+    
+    # Verificar si hay jugadores después del filtro y agrupación
+    if len(df_partido_agrupado) == 0:
         st.warning(f"⚠️ No hay jugadores de posición '{posicion_filtro}' en este partido")
         st.stop()
     
     # Mensaje informativo
-    total_jugadores = len(df_partido_filtrado)
+    total_jugadores = len(df_partido_agrupado)
+    fecha_str = pd.to_datetime(partido_seleccionado).strftime('%d/%m/%Y')
+    session_str = df_partido['session'].iloc[0]
+    
     if posicion_filtro == 'Todas':
-        st.info(f"📊 Mostrando **{total_jugadores} jugadores** - Ordenados por: **{criterio_orden}** - Coloreado vs: **{referencia_color}**")
+        st.info(f"📊 **{session_str}** ({fecha_str}) - Mostrando **{total_jugadores} jugadores** - Ordenados por: **{criterio_orden}** - Coloreado vs: **{referencia_color}**")
     else:
-        st.info(f"📊 Mostrando **{total_jugadores} {posicion_filtro}{'s' if total_jugadores > 1 else ''}** - Ordenados por: **{criterio_orden}** - Coloreado vs: **{referencia_color}**")
+        st.info(f"📊 **{session_str}** ({fecha_str}) - Mostrando **{total_jugadores} {posicion_filtro}{'s' if total_jugadores > 1 else ''}** - Ordenados por: **{criterio_orden}** - Coloreado vs: **{referencia_color}**")
     
     # ========================================
     # DASHBOARD CON PLAYER CARDS
@@ -346,7 +439,7 @@ def main():
     
     # Dashboard con filtros aplicados
     crear_dashboard_player_cards(
-        df_partido=df_partido_filtrado,
+        df_partido=df_partido_agrupado,  # ← DATOS AGRUPADOS (un jugador por fila)
         df_rango=df_rango_filtrado,
         n_partidos=n_partidos,
         criterio_orden=criterio_orden,
@@ -360,7 +453,7 @@ def main():
     st.markdown("<br>", unsafe_allow_html=True)
     
     # ========================================
-    # SECCIÓN 2: CONFIGURACIÓN DE ANÁLISIS
+    # SECCIÓN 2: CONFIGURACIÓN DE MÉTRICA
     # ========================================
     
     st.markdown("## 📊 Configuración de Análisis Detallado")
@@ -369,7 +462,7 @@ def main():
     
     with col1:
         metrica_nombre = st.selectbox(
-            "Selecciona la métrica a analizar:",
+            "Selecciona la métrica a analizar en las tabs:",
             options=list(METRICAS_DICT.keys()),
             key='metrica_equipo',
             help="Esta métrica se usará en los análisis detallados de abajo"
@@ -377,8 +470,8 @@ def main():
         metrica_col = METRICAS_DICT[metrica_nombre]
     
     with col2:
-        # Info del partido (usar df_partido original, no filtrado)
-        st.info(f"**Partido:** {df_partido['session'].iloc[0]}  \n**Fecha:** {partido_seleccionado.strftime('%d/%m/%Y')}  \n**Jugadores:** {len(df_partido)}")
+        # Recordatorio del partido
+        st.info(f"🎯 Analizando:  \n**{session_str}**  \n{fecha_str}")
     
     st.markdown("---")
     
@@ -386,7 +479,7 @@ def main():
     # SECCIÓN 3: TABS CON ANÁLISIS DETALLADOS
     # ========================================
     
-    # NOTA: Las tabs usan datos SIN filtro de posición (análisis completo del equipo)
+    # IMPORTANTE: Las tabs usan df_partido (el partido seleccionado arriba)
     
     # Tabs
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -615,7 +708,7 @@ def main():
     with tab3:
         st.subheader("📈 Evolución en el Tiempo")
         
-        # Calcular evolución
+        # Calcular evolución (usa df_rango completo)
         evolucion = calcular_evolucion_temporal(df_rango, metrica_col)
         
         if len(evolucion) > 0:
@@ -716,13 +809,18 @@ def main():
     with tab4:
         st.subheader("📋 Datos Detallados del Partido")
         
-        # Preparar tabla (usar df_partido completo, no filtrado)
+        # Preparar tabla
         df_tabla = df_partido[['player', 'position', 'time', metrica_col]].copy()
+        
+        # CRÍTICO: Limpiar jugadores inválidos
+        df_tabla = df_tabla[df_tabla['player'].notna()]  # No NaN
+        df_tabla = df_tabla[df_tabla['player'].astype(str).str.strip() != '']  # No vacíos
+        df_tabla = df_tabla[df_tabla['player'].astype(str) != '0']  # No '0'
         
         # Añadir posición desde plantilla si está disponible
         if df_plantilla is not None:
             df_tabla['Posición Real'] = df_tabla['player'].apply(
-                lambda x: mapear_posicion(x, df_plantilla)
+                lambda x: mapear_posicion(str(x), df_plantilla)
             )
         
         df_tabla = df_tabla.sort_values(metrica_col, ascending=False)
@@ -756,7 +854,7 @@ def main():
         st.download_button(
             label="📥 Descargar datos del partido (CSV)",
             data=csv,
-            file_name=f"partido_{partido_seleccionado.strftime('%Y%m%d')}_{metrica_nombre}.csv",
+            file_name=f"partido_{pd.to_datetime(partido_seleccionado).strftime('%Y%m%d')}_{metrica_nombre}.csv",
             mime="text/csv"
         )
 

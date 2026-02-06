@@ -26,15 +26,16 @@ wheels/
 # Credenciales - CRÍTICO
 service_account.json
 credentials.json
-.streamlit/secrets.toml
+*.json
+!package*.json
 
-# Streamlit
-.streamlit/
+# Streamlit secrets
+.streamlit/secrets.toml
 
 # PDFs generados
 informes_pdf/*.pdf
 
-# Logs
+# Logs y temporales
 *.log
 *.tmp
 
@@ -44,5 +45,11 @@ informes_pdf/*.pdf
 .vscode/
 .idea/
 
-# Datos sensibles (opcional, si no quieres subir CSVs locales)
+# Datos sensibles
 data/*.csv
+data/*.xlsx
+fotos_jugadores/*
+!fotos_jugadores/.gitkeep
+
+# Transcripts (pueden ser muy grandes)
+.transcripts/

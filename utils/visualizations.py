@@ -486,7 +486,11 @@ def crear_dashboard_player_cards(df_partido, df_rango, n_partidos=3,
                 jugador = jugadores[idx]
                 
                 # Obtener datos del jugador en este partido
-                jugador_data = df_partido[df_partido['player'] == jugador].iloc[0]
+                # CORREGIDO: Verificar que el jugador tenga datos antes de .iloc[0]
+                df_jug_partido = df_partido[df_partido['player'] == jugador]
+                if len(df_jug_partido) == 0:
+                    continue  # Saltar este jugador si no jugó
+                jugador_data = df_jug_partido.iloc[0]
                 
                 # Obtener posición desde plantilla o desde CSV
                 if df_plantilla is not None:

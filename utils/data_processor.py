@@ -82,20 +82,21 @@ def procesar_datos(df):
 def filtrar_por_fechas(df, fecha_desde, fecha_hasta):
     """
     Filtra el DataFrame por rango de fechas
-    
-    Args:
-        df (pd.DataFrame): DataFrame a filtrar
-        fecha_desde (datetime): Fecha de inicio
-        fecha_hasta (datetime): Fecha de fin
-        
-    Returns:
-        pd.DataFrame: DataFrame filtrado
+    Convierte fechas a datetime si son strings
     """
-    fecha_desde = pd.to_datetime(fecha_desde)
-    fecha_hasta = pd.to_datetime(fecha_hasta)
+    import pandas as pd
+    
+    # Asegurar que las fechas son datetime
+    if isinstance(fecha_desde, str):
+        fecha_desde = pd.to_datetime(fecha_desde)
+    if isinstance(fecha_hasta, str):
+        fecha_hasta = pd.to_datetime(fecha_hasta)
+    
+    # Asegurar que df['date'] es datetime
+    if df['date'].dtype == 'object':
+        df['date'] = pd.to_datetime(df['date'])
     
     df_filtrado = df[(df['date'] >= fecha_desde) & (df['date'] <= fecha_hasta)].copy()
-    
     return df_filtrado
 
 

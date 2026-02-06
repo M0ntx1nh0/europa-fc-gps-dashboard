@@ -1,34 +1,6 @@
 """
 Página: Estatus del Equipo
 Vista general y análisis del rendimiento colectivo
-
-ESTRUCTURA PARA EXPORTACIÓN PDF (futuro con FPDF):
-================================================
-Gráficos exportables:
-1. Tab "Vista General":
-   - Gráfico de barras: fig (plotly) → df_equipo_sorted (datos)
-   - Variables: metrica_col, metrica_nombre, tipo_estadistico, base_referencia
-   
-2. Tab "Comparativas":
-   - Radar Chart: fig (matplotlib) → params, low, high, valores_jugadores, nombres_jugadores
-   - Heatmap: fig (plotly) → matriz, nombres, nombres_metricas, df_tabla_valores
-   - Scatter Plot: fig (plotly) → df_scatter
-   
-3. Tab "Evolución Temporal":
-   - Líneas temporales: fig (plotly) → df_temporal
-   
-4. Tab "Distribuciones":
-   - Histograma: fig (plotly) → valores, df_percentiles
-
-Datos clave para reportes:
-- df_filtrado: DataFrame principal con datos filtrados
-- df_referencias: Referencias estadísticas calculadas
-- modo_partido: Tipo de filtro temporal aplicado
-- fecha_desde, fecha_hasta: Rango temporal
-
-Para guardar gráficos:
-- Matplotlib: fig.savefig('nombre.png', dpi=300, bbox_inches='tight')
-- Plotly: fig.write_image('nombre.png', width=1200, height=800)
 """
 
 import streamlit as st
@@ -39,6 +11,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
+from utils.filtros import render_filtro_partidos
 
 # Añadir directorio raíz al path
 root_dir = Path(__file__).parent.parent
@@ -57,134 +30,97 @@ from utils import (
     calcular_referencias_normalizadas
 )
 
-# Configuración de página
+# Configuración de página (DEBE SER LO PRIMERO)
 st.set_page_config(
     page_title=f"{PAGE_TITLE} - Estatus del Equipo",
     page_icon=PAGE_ICON,
-    layout=LAYOUT
+    layout=LAYOUT,
+    initial_sidebar_state="collapsed"  # ← AÑADIDO
 )
 
 
 def main():
-    # Renderizar sidebar común
-    render_sidebar()
+    # ==========================================
+    # VERIFICAR AUTENTICACIÓN
+    # ==========================================
+    if not st.session_state.get('autenticado', False):
+        st.warning("⚠️ Por favor, inicia sesión desde la página principal")
+        st.info("👉 Ve a la app principal para iniciar sesión")
+        st.stop()
+    
+    # ==========================================
+    # RENDERIZAR SIDEBAR
+    # ==========================================
+    render_sidebar()  # ← CORREGIDO: Sin parámetros
     
     st.title("📊 Estatus del Equipo")
     st.markdown("Vista general del rendimiento colectivo")
     
-    # Verificar que hay datos cargados
+    # ==========================================
+    # VERIFICAR DATOS CARGADOS
+    # ==========================================
     if not st.session_state.get('datos_cargados', False):
-        st.warning("⚠️ No hay datos cargados. Por favor, carga los datos desde la página **Home** primero.")
-        st.info("💡 Ve a la página Home (🏠) en el menú lateral y carga tus archivos CSV.")
+        st.warning("⚠️ No hay datos cargados")
+        st.info("💡 Ve a la página principal y carga los datos desde Google Drive")
         st.stop()
     
-    # Obtener datos del session_state
-    df = st.session_state.get('df_procesado')
+    # ==========================================
+    # OBTENER DATOS DE FORMA SEGURA
+    # ==========================================
+    df = st.session_state.get('df_procesado')  # ← CORREGIDO: Uso de .get()
     
     if df is None or len(df) == 0:
-        st.error("⚠️ No hay datos disponibles")
-        st.stop()
-    
-    # Obtener fechas del session_state
-    fecha_desde = st.session_state.get('fecha_desde')
-    fecha_hasta = st.session_state.get('fecha_hasta')
-    partido_seleccionado = st.session_state.get('partido_seleccionado')
-    
-    # Filtrar por rango de fechas
-    df_rango = filtrar_por_fechas(df, fecha_desde, fecha_hasta)
-    
-    # Obtener lista de fechas únicas para los selectores
-    fechas_disponibles = sorted(df_rango['date'].unique())
-    
-    if len(fechas_disponibles) == 0:
-        st.error("⚠️ No hay partidos disponibles en el rango seleccionado")
+        st.error("⚠️ Error: datos no disponibles")
         st.stop()
     
     # ========================================
-    # SIDEBAR - SIN CONFIGURACIÓN ADICIONAL
+    # FILTROS INDEPENDIENTES
     # ========================================
-    
-    # Ya no necesitamos selector de métrica aquí
-    # Se selecciona en "Filtros de Referencia"
-    
-    # ========================================
-    # FILTROS DE PARTIDO (Separados)
-    # ========================================
-    
-    st.subheader("🎯 Filtros de Partido")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        modo_partido = st.radio(
-            "Modo de selección:",
-            options=['Partido Específico', 'Últimos N partidos', 'Rango de Fechas'],
-            key='modo_partido'
-        )
-    
-    with col2:
-        if modo_partido == 'Partido Específico':
-            partido_sel = st.selectbox(
-                "Seleccionar partido:",
-                options=fechas_disponibles,
-                index=len(fechas_disponibles)-1,
-                format_func=lambda x: x.strftime('%d/%m/%Y'),
-                key='partido_especifico'
-            )
-            df_filtrado = df_rango[df_rango['date'] == partido_sel].copy()
-            
-        elif modo_partido == 'Últimos N partidos':
-            n_partidos = st.selectbox(
-                "Últimos N partidos:",
-                options=[1, 2, 3, 4, 5, 6, 7, 8, 9],
-                index=2,  # Default: 3
-                key='n_partidos'
-            )
-            fechas_recientes = fechas_disponibles[-n_partidos:]
-            df_filtrado = df_rango[df_rango['date'].isin(fechas_recientes)].copy()
-            partido_sel = fechas_disponibles[-1]  # Último para referencia
-            
-        else:  # Rango de Fechas
-            fecha_min = df_rango['date'].min()
-            fecha_max = df_rango['date'].max()
-            
-            fecha_inicio = st.date_input(
-                "Fecha inicio:",
-                value=fecha_max - timedelta(days=30),
-                min_value=fecha_min,
-                max_value=fecha_max,
-                key='fecha_inicio'
-            )
-            df_filtrado = df_rango[df_rango['date'] >= pd.to_datetime(fecha_inicio)].copy()
-            partido_sel = fechas_disponibles[-1]
-    
-    with col3:
-        if modo_partido == 'Rango de Fechas':
-            fecha_fin = st.date_input(
-                "Fecha fin:",
-                value=fecha_max,
-                min_value=fecha_min,
-                max_value=fecha_max,
-                key='fecha_fin'
-            )
-            df_filtrado = df_filtrado[df_filtrado['date'] <= pd.to_datetime(fecha_fin)].copy()
-        
-        st.metric(
-            "Partidos seleccionados",
-            len(df_filtrado['date'].unique())
-        )
+    df_filtrado, modo_partido, info_filtro = render_filtro_partidos(df)
     
     st.markdown("---")
     
-    # Crear diccionario de métricas disponibles para tabs (compatible con código existente)
-    metricas_disponibles = {v: k for k, v in METRICAS_DICT.items()}
-    
     # ========================================
-    # CALCULAR REFERENCIAS (usar df_filtrado completo)
+    # CALCULAR MÉTRICAS DERIVADAS (si no existen)
     # ========================================
     
-    # Las referencias se calculan sobre los datos filtrados
-    df_referencias = calcular_referencias_normalizadas(df_filtrado)
+    # Calcular HSR Relativo si no existe
+    if 'hsr_rel' not in df_filtrado.columns and 'hsr' in df_filtrado.columns and 'time' in df_filtrado.columns:
+        df_filtrado['hsr_rel'] = (df_filtrado['hsr'] / df_filtrado['time']) * 90
+        if 'hsr_rel' not in df.columns:
+            df['hsr_rel'] = (df['hsr'] / df['time']) * 90
+            st.session_state['df_procesado'] = df
+    
+    # Calcular Distancia Relativa si no existe
+    if 'total_distance_rel' not in df_filtrado.columns and 'total_distance' in df_filtrado.columns and 'time' in df_filtrado.columns:
+        df_filtrado['total_distance_rel'] = (df_filtrado['total_distance'] / df_filtrado['time']) * 90
+        if 'total_distance_rel' not in df.columns:
+            df['total_distance_rel'] = (df['total_distance'] / df['time']) * 90
+            st.session_state['df_procesado'] = df
+    
+    # Calcular Sprints Relativos si no existe
+    if 'sprints_rel' not in df_filtrado.columns and 'sprints' in df_filtrado.columns and 'time' in df_filtrado.columns:
+        df_filtrado['sprints_rel'] = (df_filtrado['sprints'] / df_filtrado['time']) * 90
+        if 'sprints_rel' not in df.columns:
+            df['sprints_rel'] = (df['sprints'] / df['time']) * 90
+            st.session_state['df_procesado'] = df
+    
+    # CORREGIDO: Crear diccionario de métricas disponibles
+    metricas_disponibles = {v: k for k, v in METRICAS_DICT.items() if v in df_filtrado.columns}
+    
+    # Añadir métricas relativas si existen pero no están en METRICAS_DICT
+    if 'hsr_rel' in df_filtrado.columns and 'hsr_rel' not in metricas_disponibles:
+        metricas_disponibles['hsr_rel'] = 'HSR Relativo (90min)'
+    
+    if 'total_distance_rel' in df_filtrado.columns and 'total_distance_rel' not in metricas_disponibles:
+        metricas_disponibles['total_distance_rel'] = 'Distancia Relativa (90min)'
+    
+    if 'sprints_rel' in df_filtrado.columns and 'sprints_rel' not in metricas_disponibles:
+        metricas_disponibles['sprints_rel'] = 'Sprints Relativos (90min)'
+    
+    if len(metricas_disponibles) == 0:
+        st.error("❌ No hay métricas disponibles en los datos")
+        st.stop()
     
     # ========================================
     # TABS PRINCIPALES
@@ -204,27 +140,27 @@ def main():
     with tab1:
         st.subheader("📊 Vista General del Equipo")
         
-        # ========================================
-        # FILTROS DE REFERENCIA (SOLO PARA ESTE TAB)
-        # ========================================
-        
         st.markdown("### 📈 Configuración de Vista General")
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Invertir METRICAS_DICT para tener nombre_bonito -> codigo_columna
+            opciones_metricas = [col for col in metricas_disponibles.keys()]
+            
+            if len(opciones_metricas) == 0:
+                st.error("❌ No hay métricas disponibles")
+                st.stop()
+            
             metrica_col = st.selectbox(
                 "Métrica a analizar:",
-                options=list(METRICAS_DICT.values()),  # Códigos de columna
-                format_func=lambda x: [k for k, v in METRICAS_DICT.items() if v == x][0],  # Nombre bonito
-                index=0,  # HSR por defecto
+                options=opciones_metricas,
+                format_func=lambda x: metricas_disponibles[x],
+                index=0,
                 key='metrica_analizar',
                 help="Métrica principal para este análisis"
             )
             
-            # Obtener nombre bonito
-            metrica_nombre = [k for k, v in METRICAS_DICT.items() if v == metrica_col][0]
+            metrica_nombre = metricas_disponibles[metrica_col]
         
         with col2:
             tipo_estadistico = st.selectbox(
@@ -255,15 +191,34 @@ def main():
         
         st.markdown("---")
         
+        if metrica_col not in df_filtrado.columns:
+            st.error(f"❌ La columna '{metrica_col}' no existe en los datos filtrados")
+            st.stop()
+        
         # Agrupar por jugador (promedio si son varios partidos)
         if modo_partido == 'Partido Específico':
             df_equipo = df_filtrado.copy()
         else:
-            # Promediar por jugador
             df_equipo = df_filtrado.groupby('player').agg({
                 metrica_col: 'mean',
                 'time': 'mean'
             }).reset_index()
+        
+        # ========================================
+        # CORREGIDO: Calcular referencias MANUALMENTE sobre la métrica específica
+        # ========================================
+        referencias_manual = {
+            'Media': df_equipo[metrica_col].mean(),
+            'Mediana': df_equipo[metrica_col].median(),
+            'P70': df_equipo[metrica_col].quantile(0.70),
+            'P75': df_equipo[metrica_col].quantile(0.75),
+            'P80': df_equipo[metrica_col].quantile(0.80),
+            'P85': df_equipo[metrica_col].quantile(0.85),
+            'P90': df_equipo[metrica_col].quantile(0.90),
+            'P95': df_equipo[metrica_col].quantile(0.95),
+            'Máximo': df_equipo[metrica_col].max(),
+            'Mínimo': df_equipo[metrica_col].min()
+        }
         
         # Métricas del equipo
         col1, col2, col3, col4 = st.columns(4)
@@ -271,21 +226,21 @@ def main():
         with col1:
             st.metric(
                 f"Media {metrica_nombre}",
-                f"{df_equipo[metrica_col].mean():.1f}",
+                f"{referencias_manual['Media']:.1f}",
                 delta=None
             )
         
         with col2:
             st.metric(
                 f"Máximo {metrica_nombre}",
-                f"{df_equipo[metrica_col].max():.1f}",
+                f"{referencias_manual['Máximo']:.1f}",
                 delta=None
             )
         
         with col3:
             st.metric(
                 f"Mínimo {metrica_nombre}",
-                f"{df_equipo[metrica_col].min():.1f}",
+                f"{referencias_manual['Mínimo']:.1f}",
                 delta=None
             )
         
@@ -301,18 +256,16 @@ def main():
         # Gráfico de barras con todos los jugadores
         st.subheader(f"🏃 Rendimiento Individual - {metrica_nombre}")
         
-        # Ordenar por métrica
         df_equipo_sorted = df_equipo.sort_values(metrica_col, ascending=True)
         
-        # Si "Basado en posición", añadir columna de posición y colorear
         if base_referencia == 'Por posición':
             try:
                 df_plantilla = cargar_plantilla_europa()
+                # CORREGIDO: Proteger mapeo de posiciones
                 df_equipo_sorted['posicion'] = df_equipo_sorted['player'].apply(
-                    lambda x: mapear_posicion(x, df_plantilla)
+                    lambda x: mapear_posicion(str(x), df_plantilla) if pd.notna(x) and str(x).strip() != '' and str(x) != '0' else 'Sin posición'
                 )
                 
-                # Colores por posición
                 colores_posicion = {
                     'Defensa': '#ef4444',
                     'Centrocampista': '#3b82f6',
@@ -320,7 +273,6 @@ def main():
                     'Sin posición': '#9ca3af'
                 }
                 
-                # Asignar color a cada jugador según su posición
                 df_equipo_sorted['color'] = df_equipo_sorted['posicion'].map(colores_posicion)
                 
             except Exception as e:
@@ -328,13 +280,11 @@ def main():
                 df_equipo_sorted['posicion'] = 'Sin posición'
                 df_equipo_sorted['color'] = '#1f77b4'
         else:
-            # Color único para todo el equipo
             df_equipo_sorted['color'] = COLORES['primario']
         
         # Crear gráfico
         fig = go.Figure()
         
-        # Si hay posiciones, crear una barra por posición
         if base_referencia == 'Por posición' and 'posicion' in df_equipo_sorted.columns:
             for posicion in ['Defensa', 'Centrocampista', 'Delantero', 'Sin posición']:
                 df_pos = df_equipo_sorted[df_equipo_sorted['posicion'] == posicion]
@@ -353,7 +303,6 @@ def main():
                                      '<extra></extra>'
                     ))
         else:
-            # Barras con color único
             fig.add_trace(go.Bar(
                 y=df_equipo_sorted['player'],
                 x=df_equipo_sorted[metrica_col],
@@ -367,54 +316,51 @@ def main():
                              '<extra></extra>'
             ))
         
-        # Añadir líneas de referencia seleccionadas
-        if df_referencias is not None:
-            ref = obtener_referencia_metrica(df_referencias, metrica_col)
-            if ref is not None and isinstance(ref, dict):
-                # Colores distintivos para cada tipo de referencia
-                colores_ref = {
-                    'Media': '#FFA500',      # Naranja
-                    'Mediana': '#9370DB',    # Púrpura
-                    'P75': '#4169E1',        # Azul real
-                    'P80': '#20B2AA',        # Verde azulado
-                    'P85': '#32CD32',        # Verde lima
-                    'P90': '#FF4500',        # Rojo-naranja
-                    'P95': '#DC143C',        # Crimson
-                    'Máximo': '#8B0000'      # Rojo oscuro
-                }
-                
-                # Primero añadir el estadístico principal (más grueso)
-                if tipo_estadistico in ref:
-                    fig.add_vline(
-                        x=ref[tipo_estadistico],
-                        line_dash="solid",
-                        line_color=colores_ref.get(tipo_estadistico, '#FF0000'),
-                        line_width=3,
-                        annotation_text=f"🎯 {tipo_estadistico}: {ref[tipo_estadistico]:.1f}",
-                        annotation_position="top right",
-                        annotation=dict(
-                            font=dict(size=12, color="white"),
-                            bgcolor=colores_ref.get(tipo_estadistico, '#FF0000'),
-                            borderpad=4
-                        )
+        # CORREGIDO: Usar referencias_manual
+        colores_ref = {
+            'Media': '#FFA500',
+            'Mediana': '#9370DB',
+            'P70': '#4169E1',
+            'P75': '#4169E1',
+            'P80': '#20B2AA',
+            'P85': '#32CD32',
+            'P90': '#FF4500',
+            'P95': '#DC143C',
+            'Máximo': '#8B0000'
+        }
+        
+        # Estadístico principal
+        if tipo_estadistico in referencias_manual:
+            fig.add_vline(
+                x=referencias_manual[tipo_estadistico],
+                line_dash="solid",
+                line_color=colores_ref.get(tipo_estadistico, '#FF0000'),
+                line_width=3,
+                annotation_text=f"🎯 {tipo_estadistico}: {referencias_manual[tipo_estadistico]:.1f}",
+                annotation_position="top right",
+                annotation=dict(
+                    font=dict(size=12, color="white"),
+                    bgcolor=colores_ref.get(tipo_estadistico, '#FF0000'),
+                    borderpad=4
+                )
+            )
+        
+        # Referencias adicionales
+        for ref_tipo in mostrar_referencias:
+            if ref_tipo in referencias_manual and ref_tipo != tipo_estadistico:
+                fig.add_vline(
+                    x=referencias_manual[ref_tipo],
+                    line_dash="dash",
+                    line_color=colores_ref.get(ref_tipo, '#999999'),
+                    line_width=2,
+                    annotation_text=f"{ref_tipo}: {referencias_manual[ref_tipo]:.1f}",
+                    annotation_position="bottom right",
+                    annotation=dict(
+                        font=dict(size=10, color="white"),
+                        bgcolor=colores_ref.get(ref_tipo, '#999999'),
+                        borderpad=3
                     )
-                
-                # Luego añadir referencias adicionales (más finas)
-                for ref_tipo in mostrar_referencias:
-                    if ref_tipo in ref and ref_tipo != tipo_estadistico:
-                        fig.add_vline(
-                            x=ref[ref_tipo],
-                            line_dash="dash",
-                            line_color=colores_ref.get(ref_tipo, '#999999'),
-                            line_width=2,
-                            annotation_text=f"{ref_tipo}: {ref[ref_tipo]:.1f}",
-                            annotation_position="bottom right",
-                            annotation=dict(
-                                font=dict(size=10, color="white"),
-                                bgcolor=colores_ref.get(ref_tipo, '#999999'),
-                                borderpad=3
-                            )
-                        )
+                )
         
         fig.update_layout(
             title=f"Comparativa de Jugadores - {metrica_nombre}" + 
@@ -449,27 +395,14 @@ def main():
     with tab4:
         st.subheader("📈 Distribución del Equipo")
         
-        # Explicación del gráfico
         st.markdown("""
         **¿Qué muestra este gráfico?**
         
-        El **histograma** muestra cómo se distribuyen los valores de una métrica en tu equipo:
-        - **Eje horizontal (X)**: Rango de valores de la métrica (ej: HSR de 400 a 900)
-        - **Eje vertical (Y)**: Cuántos jugadores/partidos hay en cada rango
-        - **Barras altas**: Muchos jugadores/partidos con esos valores (zona común)
-        - **Barras bajas**: Pocos jugadores/partidos con esos valores (zona rara)
-        
-        **Líneas de referencia:**
-        - 🔴 **Media** (roja): Promedio del equipo
-        - 🟠 **P75** (naranja): Top 25% del equipo
-        - 🟢 **P90** (verde): Top 10% del equipo (élite)
-        
-        **Ejemplo:** Si hay una barra alta en 700-750 de HSR, significa que la mayoría del equipo hace entre 700-750 metros de alta intensidad.
+        El **histograma** muestra cómo se distribuyen los valores de una métrica en tu equipo.
         """)
         
         st.markdown("---")
         
-        # Selector de métrica para histograma
         col1, col2 = st.columns([3, 1])
         
         with col1:
@@ -491,17 +424,14 @@ def main():
         
         metrica_dist_nombre = metricas_disponibles[metrica_dist]
         
-        # Preparar datos
         if modo_partido == 'Partido Específico':
             valores = df_filtrado[metrica_dist].dropna()
         else:
-            # Todos los valores individuales (no promediados)
             valores = df_filtrado[metrica_dist].dropna()
         
         if len(valores) == 0:
             st.warning("⚠️ No hay datos para mostrar")
         else:
-            # Calcular estadísticos
             col1, col2, col3, col4, col5 = st.columns(5)
             
             with col1:
@@ -517,7 +447,6 @@ def main():
             
             st.markdown("---")
             
-            # Histograma
             fig = go.Figure()
             
             fig.add_trace(go.Histogram(
@@ -529,44 +458,37 @@ def main():
                 hovertemplate='Rango: %{x}<br>Frecuencia: %{y}<extra></extra>'
             ))
             
-            # Líneas verticales de referencias
-            if df_referencias is not None:
-                ref = obtener_referencia_metrica(df_referencias, metrica_dist)
-                if ref is not None and isinstance(ref, dict):
-                    # Media
-                    fig.add_vline(
-                        x=ref['Media'],
-                        line_dash="solid",
-                        line_color='red',
-                        line_width=2,
-                        annotation_text=f"Media: {ref['Media']:.1f}",
-                        annotation_position="top right"
-                    )
-                    # P75
-                    if 'P75' in ref:
-                        fig.add_vline(
-                            x=ref['P75'],
-                            line_dash="dash",
-                            line_color='orange',
-                            line_width=2,
-                            annotation_text=f"P75: {ref['P75']:.1f}",
-                            annotation_position="top right"
-                        )
-                    # P90
-                    if 'P90' in ref:
-                        fig.add_vline(
-                            x=ref['P90'],
-                            line_dash="dot",
-                            line_color='green',
-                            line_width=2,
-                            annotation_text=f"P90: {ref['P90']:.1f}",
-                            annotation_position="top left"
-                        )
+            fig.add_vline(
+                x=valores.mean(),
+                line_dash="solid",
+                line_color='red',
+                line_width=2,
+                annotation_text=f"Media: {valores.mean():.1f}",
+                annotation_position="top right"
+            )
+            
+            fig.add_vline(
+                x=valores.quantile(0.75),
+                line_dash="dash",
+                line_color='orange',
+                line_width=2,
+                annotation_text=f"P75: {valores.quantile(0.75):.1f}",
+                annotation_position="top right"
+            )
+            
+            fig.add_vline(
+                x=valores.quantile(0.90),
+                line_dash="dot",
+                line_color='green',
+                line_width=2,
+                annotation_text=f"P90: {valores.quantile(0.90):.1f}",
+                annotation_position="top left"
+            )
             
             fig.update_layout(
-                title=f"Histograma de {metrica_dist_nombre} - Distribución de Frecuencias",
-                xaxis_title=f"{metrica_dist_nombre} (rangos de valores)",
-                yaxis_title="Frecuencia (cuántos jugadores/partidos)",
+                title=f"Histograma de {metrica_dist_nombre}",
+                xaxis_title=f"{metrica_dist_nombre}",
+                yaxis_title="Frecuencia",
                 height=550,
                 showlegend=False,
                 bargap=0.1
@@ -574,7 +496,6 @@ def main():
             
             st.plotly_chart(fig, use_container_width=True)
             
-            # Tabla de percentiles
             st.subheader("📊 Tabla de Percentiles")
             
             percentiles = [10, 25, 50, 75, 90, 95]
@@ -597,13 +518,11 @@ def main():
             
             st.dataframe(df_percentiles, use_container_width=True, hide_index=True)
             
-            # Interpretación
             st.info(f"""
             **💡 Interpretación:**
             - **P90 ({valores.quantile(0.90):.1f})**: Solo el top 10% alcanza o supera este valor
             - **P75 ({valores.quantile(0.75):.1f})**: El top 25% del equipo está por encima
             - **Mediana ({valores.median():.1f})**: 50% del equipo está por encima y 50% por debajo
-            - **Media ({valores.mean():.1f})**: Promedio del equipo (puede verse afectado por valores extremos)
             """)
 
     
@@ -614,7 +533,6 @@ def main():
     with tab2:
         st.subheader("🎯 Análisis Comparativo")
         
-        # Selector de modo
         modo_comparativa = st.radio(
             "Modo de análisis:",
             options=['Scatter Plot (2 métricas)', 'Comparar Jugadores/Posiciones'],
@@ -625,18 +543,15 @@ def main():
         st.markdown("---")
         
         if modo_comparativa == 'Scatter Plot (2 métricas)':
-            st.markdown("""
-            **Scatter Plot:** Analiza la relación entre dos métricas. Cada punto representa un jugador.
-            """)
+            st.markdown("**Scatter Plot:** Analiza la relación entre dos métricas.")
             
-            # Selectores de métricas y filtros
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 metrica_x = st.selectbox(
                     "Métrica Eje X:",
                     options=list(metricas_disponibles.keys()),
-                    index=1,  # Distancia por defecto
+                    index=min(1, len(metricas_disponibles)-1),
                     format_func=lambda x: metricas_disponibles[x],
                     key='metrica_x_scatter'
                 )
@@ -645,7 +560,7 @@ def main():
                 metrica_y = st.selectbox(
                     "Métrica Eje Y:",
                     options=list(metricas_disponibles.keys()),
-                    index=0,  # HSR por defecto
+                    index=0,
                     format_func=lambda x: metricas_disponibles[x],
                     key='metrica_y_scatter'
                 )
@@ -655,8 +570,7 @@ def main():
                     "Filtrar por posición:",
                     options=['Todas', 'Defensa', 'Centrocampista', 'Delantero'],
                     index=0,
-                    key='filtro_posicion_scatter',
-                    help="Mostrar solo jugadores de una posición"
+                    key='filtro_posicion_scatter'
                 )
             
             with col4:
@@ -669,41 +583,39 @@ def main():
             metrica_x_nombre = metricas_disponibles[metrica_x]
             metrica_y_nombre = metricas_disponibles[metrica_y]
             
-            # Preparar datos
-            if modo_partido == 'Partido Específico':
-                df_scatter = df_filtrado[['player', metrica_x, metrica_y, 'time']].copy()
-            else:
-                # Promediar por jugador
-                df_scatter = df_filtrado.groupby('player').agg({
-                    metrica_x: 'mean',
-                    metrica_y: 'mean',
-                    'time': 'mean'
-                }).reset_index()
+            if metrica_x not in df_filtrado.columns or metrica_y not in df_filtrado.columns:
+                st.error(f"❌ Una o ambas métricas no están disponibles")
+                st.stop()
             
-            # Eliminar NaN
+            # CORREGIDO: Siempre agrupar por jugador
+            df_scatter = df_filtrado.groupby('player').agg({
+                metrica_x: 'mean',
+                metrica_y: 'mean',
+                'time': 'mean'
+            }).reset_index()
+            
             df_scatter = df_scatter.dropna(subset=[metrica_x, metrica_y])
             
             if len(df_scatter) == 0:
-                st.warning("⚠️ No hay datos suficientes para el scatter plot")
+                st.warning("⚠️ No hay datos suficientes")
             else:
-                # Intentar cargar posiciones para colorear
                 try:
                     df_plantilla = cargar_plantilla_europa()
+                    # CORREGIDO: Proteger mapeo de posiciones
                     df_scatter['posicion'] = df_scatter['player'].apply(
-                        lambda x: mapear_posicion(x, df_plantilla)
+                        lambda x: mapear_posicion(str(x), df_plantilla) if pd.notna(x) and str(x).strip() != '' and str(x) != '0' else 'Sin posición'
                     )
-                except:
+                except Exception as e:
+                    st.warning(f"⚠️ No se pudo cargar posiciones: {e}")
                     df_scatter['posicion'] = 'Sin posición'
                 
-                # Aplicar filtro de posición si está seleccionado
                 if filtro_posicion_scatter != 'Todas':
                     df_scatter = df_scatter[df_scatter['posicion'] == filtro_posicion_scatter].copy()
                     
                     if len(df_scatter) == 0:
-                        st.warning(f"⚠️ No hay jugadores de la posición '{filtro_posicion_scatter}' en los datos seleccionados")
+                        st.warning(f"⚠️ No hay jugadores de '{filtro_posicion_scatter}'")
                         st.stop()
                 
-                # Crear scatter plot
                 fig = px.scatter(
                     df_scatter,
                     x=metrica_x,
@@ -730,7 +642,6 @@ def main():
                     }
                 )
                 
-                # Añadir nombres si está activado
                 if mostrar_nombres:
                     for _, row in df_scatter.iterrows():
                         fig.add_annotation(
@@ -742,29 +653,24 @@ def main():
                             font=dict(size=9)
                         )
                 
-                # Añadir líneas de referencia
-                if df_referencias is not None:
-                    # Línea vertical (eje X)
-                    ref_x = obtener_referencia_metrica(df_referencias, metrica_x)
-                    if ref_x is not None and isinstance(ref_x, dict) and tipo_estadistico in ref_x:
-                        fig.add_vline(
-                            x=ref_x[tipo_estadistico],
-                            line_dash="dash",
-                            line_color='gray',
-                            annotation_text=f"{tipo_estadistico} X",
-                            annotation_position="top"
-                        )
-                    
-                    # Línea horizontal (eje Y)
-                    ref_y = obtener_referencia_metrica(df_referencias, metrica_y)
-                    if ref_y is not None and isinstance(ref_y, dict) and tipo_estadistico in ref_y:
-                        fig.add_hline(
-                            y=ref_y[tipo_estadistico],
-                            line_dash="dash",
-                            line_color='gray',
-                            annotation_text=f"{tipo_estadistico} Y",
-                            annotation_position="right"
-                        )
+                media_x = df_scatter[metrica_x].mean()
+                media_y = df_scatter[metrica_y].mean()
+                
+                fig.add_vline(
+                    x=media_x,
+                    line_dash="dash",
+                    line_color='gray',
+                    annotation_text=f"Media X: {media_x:.1f}",
+                    annotation_position="top"
+                )
+                
+                fig.add_hline(
+                    y=media_y,
+                    line_dash="dash",
+                    line_color='gray',
+                    annotation_text=f"Media Y: {media_y:.1f}",
+                    annotation_position="right"
+                )
                 
                 fig.update_traces(marker=dict(size=12))
                 
@@ -776,221 +682,243 @@ def main():
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Análisis de cuadrantes
-                if df_referencias is not None:
-                    ref_x = obtener_referencia_metrica(df_referencias, metrica_x)
-                    ref_y = obtener_referencia_metrica(df_referencias, metrica_y)
-                    
-                    if (ref_x is not None and isinstance(ref_x, dict) and tipo_estadistico in ref_x and
-                        ref_y is not None and isinstance(ref_y, dict) and tipo_estadistico in ref_y):
-                        
-                        valor_ref_x = ref_x[tipo_estadistico]
-                        valor_ref_y = ref_y[tipo_estadistico]
-                        
-                        # Clasificar en cuadrantes
-                        df_scatter['cuadrante'] = 'Bajo en ambas'
-                        df_scatter.loc[
-                            (df_scatter[metrica_x] >= valor_ref_x) & (df_scatter[metrica_y] >= valor_ref_y),
-                            'cuadrante'
-                        ] = '🟢 Alto en ambas'
-                        df_scatter.loc[
-                            (df_scatter[metrica_x] >= valor_ref_x) & (df_scatter[metrica_y] < valor_ref_y),
-                            'cuadrante'
-                        ] = f'🔵 Alto en {metrica_x_nombre}'
-                        df_scatter.loc[
-                            (df_scatter[metrica_x] < valor_ref_x) & (df_scatter[metrica_y] >= valor_ref_y),
-                            'cuadrante'
-                        ] = f'🔵 Alto en {metrica_y_nombre}'
-                        df_scatter.loc[
-                            (df_scatter[metrica_x] < valor_ref_x) & (df_scatter[metrica_y] < valor_ref_y),
-                            'cuadrante'
-                        ] = '🟠 Bajo en ambas'
-                        
-                        st.subheader("📊 Análisis por Cuadrantes")
-                        
-                        # Contar jugadores por cuadrante
-                        cuadrantes = df_scatter['cuadrante'].value_counts()
-                        
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        for idx, (cuad, col) in enumerate(zip(cuadrantes.index, [col1, col2, col3, col4])):
-                            with col:
-                                st.metric(
-                                    cuad,
-                                    cuadrantes[cuad],
-                                    delta=f"{cuadrantes[cuad]/len(df_scatter)*100:.0f}%"
-                                )
-                        
-                        # Listar jugadores por cuadrante
-                        with st.expander("👥 Ver jugadores por cuadrante"):
-                            for cuad in cuadrantes.index:
-                                st.markdown(f"**{cuad}:**")
-                                jugadores = df_scatter[df_scatter['cuadrante'] == cuad]['player'].tolist()
-                                st.write(", ".join(jugadores))
-                                st.markdown("")
+                st.subheader("📊 Análisis por Cuadrantes")
+                
+                df_scatter['cuadrante'] = '🟠 Bajo en ambas'
+                df_scatter.loc[
+                    (df_scatter[metrica_x] >= media_x) & (df_scatter[metrica_y] >= media_y),
+                    'cuadrante'
+                ] = '🟢 Alto en ambas'
+                df_scatter.loc[
+                    (df_scatter[metrica_x] >= media_x) & (df_scatter[metrica_y] < media_y),
+                    'cuadrante'
+                ] = f'🔵 Alto en {metrica_x_nombre}'
+                df_scatter.loc[
+                    (df_scatter[metrica_x] < media_x) & (df_scatter[metrica_y] >= media_y),
+                    'cuadrante'
+                ] = f'🔵 Alto en {metrica_y_nombre}'
+                
+                cuadrantes = df_scatter['cuadrante'].value_counts()
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                for idx, (cuad, col) in enumerate(zip(cuadrantes.index, [col1, col2, col3, col4])):
+                    with col:
+                        st.metric(
+                            cuad,
+                            cuadrantes[cuad],
+                            delta=f"{cuadrantes[cuad]/len(df_scatter)*100:.0f}%"
+                        )
+                
+                with st.expander("👥 Ver jugadores por cuadrante"):
+                    for cuad in cuadrantes.index:
+                        st.markdown(f"**{cuad}:**")
+                        jugadores = df_scatter[df_scatter['cuadrante'] == cuad]['player'].tolist()
+                        st.write(", ".join([str(j) for j in jugadores]))
+                        st.markdown("")
         
-        else:  # Modo: Comparar Jugadores/Posiciones
-            st.markdown("""
-            **Comparar Jugadores/Posiciones:** Visualiza perfiles completos con Radar Chart o Heatmap.
-            """)
+        else:  # Comparar Jugadores/Posiciones
+            st.markdown("**Comparar:** Visualiza perfiles con Radar/Heatmap/Barras")
             
-            # Selectores principales
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 modo_comparar = st.radio(
                     "Comparar por:",
-                    options=['Jugadores individuales', 'Posiciones (promedio)'],
+                    options=['Jugadores individuales', 'Jugadores por posición', 'Posiciones (promedio)'],
                     key='modo_comparar',
-                    help="Jugadores: Selecciona hasta 3 jugadores específicos\nPosiciones: Compara promedios por posición (se aplicará el estadístico seleccionado)"
+                    help="Individuales: Selecciona jugadores específicos\nPor posición: Todos los jugadores agrupados por posición\nPromedio: Promedio de cada posición"
                 )
             
             with col2:
                 estadistico_comparar = st.selectbox(
-                    "Estadística a usar:",
-                    options=['Media', 'Mediana', 'Máximo', 'Mínimo', 'P70', 'P75', 'P80', 'P85', 'P90', 'P95'],
+                    "Estadística:",
+                    options=['Media', 'Mediana', 'Máximo', 'Mínimo', 'P90'],
                     index=0,
-                    key='estadistico_comparar',
-                    help="Estadístico que se usará para calcular los valores de cada jugador/posición"
+                    key='estadistico_comparar'
                 )
             
             with col3:
-                tipo_viz = st.radio(
-                    "Tipo de visualización:",
-                    options=['Radar/Spider Chart', 'Heatmap', 'Gráfico de Barras'],
-                    key='tipo_viz',
-                    help="Radar: Perfiles visuales completos (mín. 3 métricas)\nHeatmap: Tabla de colores compacta\nBarras: Comparación directa (cualquier número de métricas)"
-                )
+                # CORREGIDO: Filtrar opciones de visualización según modo
+                if modo_comparar == 'Jugadores por posición':
+                    opciones_viz = ['Heatmap', 'Gráfico de Barras']
+                    tipo_viz = st.radio(
+                        "Visualización:",
+                        options=opciones_viz,
+                        key='tipo_viz',
+                        help="⚠️ Radar Chart no disponible para 'Jugadores por posición' (demasiados elementos)"
+                    )
+                else:
+                    tipo_viz = st.radio(
+                        "Visualización:",
+                        options=['Radar/Spider Chart', 'Heatmap', 'Gráfico de Barras'],
+                        key='tipo_viz'
+                    )
             
             st.markdown("---")
+
+            # INDICADOR VISUAL DEL ESTADÍSTICO ACTIVO
+            st.info(f"📊 **Estadístico activo:** {estadistico_comparar} | **Modo:** {modo_comparar}")
             
-            # Preparar datos base según estadístico
-            if modo_partido == 'Partido Específico':
-                # Para partido específico, usar valores directos
-                df_comp_base = df_filtrado.copy()
-            else:
-                # Para múltiples partidos, aplicar el estadístico seleccionado
-                # Mapeo de estadísticos a funciones de agregación
-                estadistico_map = {
-                    'Media': 'mean',
-                    'Mediana': 'median',
-                    'Máximo': 'max',
-                    'Mínimo': 'min',
-                    'P70': lambda x: x.quantile(0.70),
-                    'P75': lambda x: x.quantile(0.75),
-                    'P80': lambda x: x.quantile(0.80),
-                    'P85': lambda x: x.quantile(0.85),
-                    'P90': lambda x: x.quantile(0.90),
-                    'P95': lambda x: x.quantile(0.95)
-                }
-                
-                agg_func = estadistico_map[estadistico_comparar]
-                
-                # Agrupar por jugador aplicando el estadístico
-                df_comp_base = df_filtrado.groupby('player').agg({
-                    metrica: agg_func for metrica in metricas_disponibles.keys()
-                }).reset_index()
+            # ========================================
+            # PREPARAR DATOS BASE - LIMPIEZA Y AGREGACIÓN
+            # ========================================
+                        
+            # PASO 1: Limpiar datos inválidos
+            df_limpio = df_filtrado.copy()
+
+            # Filtrar filas con player inválido (NaN, '0', vacíos)
+            df_limpio = df_limpio[df_limpio['player'].notna()]  # No NaN
+            df_limpio = df_limpio[df_limpio['player'].astype(str).str.strip() != '']  # No vacíos
+            df_limpio = df_limpio[df_limpio['player'].astype(str) != '0']  # No '0'
+            df_limpio = df_limpio[df_limpio['player'].astype(str) != 'nan']  # No 'nan' como string
+
+            if len(df_limpio) == 0:
+                st.error("❌ No hay datos válidos después de filtrar jugadores inválidos")
+                st.stop()
+
+            # PASO 2: Agrupar por jugador (SIEMPRE, incluso en Partido Específico)
+            # Esto evita duplicados de jugadores en el mismo partido
+            estadistico_map = {
+                'Media': 'mean',
+                'Mediana': 'median',
+                'Máximo': 'max',
+                'Mínimo': 'min',
+                'P90': lambda x: x.quantile(0.90)
+            }
+
+            agg_func = estadistico_map[estadistico_comparar]
+
+            df_comp_base = df_limpio.groupby('player').agg({
+                metrica: agg_func for metrica in metricas_disponibles.keys()
+            }).reset_index()
+
+            # Asegurar que player sea string
+            df_comp_base['player'] = df_comp_base['player'].astype(str)
             
-            # Selector según modo
             col_sel, col_metricas = st.columns([2, 1])
             
             with col_sel:
                 if modo_comparar == 'Jugadores individuales':
-                    jugadores_disponibles = sorted(df_comp_base['player'].unique())
+                    jugadores_disponibles = sorted(df_comp_base['player'].dropna().astype(str).unique())
                     
                     elementos_seleccionados = st.multiselect(
-                        "Seleccionar jugadores (máximo 3):",
+                        "Jugadores (máx 3):",
                         options=jugadores_disponibles,
                         default=jugadores_disponibles[:min(3, len(jugadores_disponibles))],
                         max_selections=3,
-                        key='jugadores_comparar_visual',
-                        help="Máximo 3 jugadores para mantener visualización clara"
+                        key='jugadores_comparar_visual'
                     )
                     
                     if len(elementos_seleccionados) < 2:
-                        st.warning("⚠️ Selecciona al menos 2 jugadores")
+                        st.warning("⚠️ Selecciona al menos 2")
                         st.stop()
                     
-                    # Filtrar datos
                     df_comparacion = df_comp_base[df_comp_base['player'].isin(elementos_seleccionados)].copy()
                     df_comparacion['nombre'] = df_comparacion['player']
-                    
-                else:  # Por posiciones
-                    elementos_seleccionados = st.multiselect(
-                        "Seleccionar posiciones (máximo 3):",
-                        options=['Defensa', 'Centrocampista', 'Delantero'],
-                        default=['Defensa', 'Centrocampista', 'Delantero'],
-                        max_selections=3,
-                        key='posiciones_comparar_visual',
-                        help=f"Compara el {estadistico_comparar.lower()} de cada posición"
-                    )
-                    
-                    if len(elementos_seleccionados) < 2:
-                        st.warning("⚠️ Selecciona al menos 2 posiciones")
-                        st.stop()
-                    
-                    # Cargar posiciones y agrupar según estadístico
+                    df_comparacion['grupo'] = df_comparacion['player']
+                
+                elif modo_comparar == 'Jugadores por posición':
                     try:
                         df_plantilla = cargar_plantilla_europa()
                         
-                        # Si es partido específico, usar df_filtrado con posiciones
-                        if modo_partido == 'Partido Específico':
-                            df_temp = df_filtrado.copy()
-                        else:
-                            # Para múltiples partidos, primero aplicar estadístico por jugador
-                            # (ya calculado en df_comp_base)
-                            df_temp = df_comp_base.copy()
-                        
-                        df_temp['posicion'] = df_temp['player'].apply(
-                            lambda x: mapear_posicion(x, df_plantilla)
+                        # CORREGIDO: Proteger mapeo de posiciones
+                        df_comp_base['posicion'] = df_comp_base['player'].apply(
+                            lambda x: mapear_posicion(str(x), df_plantilla) if pd.notna(x) and str(x).strip() != '' and str(x) != '0' else 'Sin posición'
                         )
                         
-                        # Agrupar por posición (usando media de los valores ya agregados por jugador)
-                        # O valores directos si es partido específico
+                        elementos_seleccionados = st.multiselect(
+                            "Seleccionar posiciones:",
+                            options=['Defensa', 'Centrocampista', 'Delantero'],
+                            default=['Defensa', 'Centrocampista', 'Delantero'],
+                            key='posiciones_jugadores_visual',
+                            help="Muestra todos los jugadores de las posiciones seleccionadas"
+                        )
+                        
+                        if len(elementos_seleccionados) == 0:
+                            st.warning("⚠️ Selecciona al menos 1 posición")
+                            st.stop()
+                        
+                        df_comparacion = df_comp_base[df_comp_base['posicion'].isin(elementos_seleccionados)].copy()
+                        
+                        if len(df_comparacion) == 0:
+                            st.warning("⚠️ No hay jugadores en las posiciones seleccionadas")
+                            st.stop()
+                        
+                        df_comparacion['nombre'] = df_comparacion['player']
+                        df_comparacion['grupo'] = df_comparacion['posicion']
+                        
+                    except Exception as e:
+                        st.error(f"⚠️ Error al cargar posiciones: {e}")
+                        st.stop()
+                    
+                else:  # Posiciones (promedio)
+                    elementos_seleccionados = st.multiselect(
+                        "Posiciones (máx 3):",
+                        options=['Defensa', 'Centrocampista', 'Delantero'],
+                        default=['Defensa', 'Centrocampista', 'Delantero'],
+                        max_selections=3,
+                        key='posiciones_comparar_visual'
+                    )
+                    
+                    if len(elementos_seleccionados) < 2:
+                        st.warning("⚠️ Selecciona al menos 2")
+                        st.stop()
+                    
+                    try:
+                        df_plantilla = cargar_plantilla_europa()
+                        
+                        # CORREGIDO: Usar df_comp_base que YA tiene la agregación por jugador según estadistico_comparar
+                        df_temp = df_comp_base.copy()
+                        
+                        # Mapear posiciones (los jugadores ya están en df_comp_base, un registro por jugador)
+                        df_temp['posicion'] = df_temp['player'].apply(
+                            lambda x: mapear_posicion(str(x), df_plantilla) if pd.notna(x) and str(x).strip() != '' and str(x) != '0' else 'Sin posición'
+                        )
+                        
+                        # CORREGIDO: Agrupar por posición - ahora promedia el estadístico de cada jugador
+                        # df_comp_base ya contiene el estadístico seleccionado (Media, Máximo, etc.) por jugador
+                        # Aquí promediamos esos estadísticos por posición
                         df_comparacion = df_temp.groupby('posicion').agg({
                             metrica: 'mean' for metrica in metricas_disponibles.keys()
                         }).reset_index()
                         
-                        # Filtrar solo las seleccionadas
                         df_comparacion = df_comparacion[df_comparacion['posicion'].isin(elementos_seleccionados)].copy()
                         df_comparacion['nombre'] = df_comparacion['posicion']
+                        df_comparacion['grupo'] = df_comparacion['posicion']
                         
                         if len(df_comparacion) == 0:
-                            st.warning("⚠️ No hay datos para las posiciones seleccionadas")
+                            st.warning("⚠️ Sin datos")
                             st.stop()
                             
                     except Exception as e:
-                        st.error(f"⚠️ Error al cargar posiciones: {e}")
+                        st.error(f"⚠️ Error: {e}")
                         st.stop()
             
             with col_metricas:
                 metricas_comparar = st.multiselect(
-                    "Métricas a comparar:",
+                    "Métricas:",
                     options=list(metricas_disponibles.keys()),
-                    default=['hsr', 'total_distance', 'sprints', 'max_speed'],
+                    default=[m for m in ['hsr', 'total_distance', 'sprints', 'max_speed'] if m in metricas_disponibles.keys()][:4],
                     format_func=lambda x: metricas_disponibles[x],
-                    key='metricas_comparar_visual',
-                    help="Selecciona las métricas que quieres visualizar"
+                    key='metricas_comparar_visual'
                 )
                 
-                if len(metricas_comparar) < 3:
-                    if tipo_viz == 'Radar/Spider Chart':
-                        st.warning("⚠️ El Radar Chart requiere al menos 3 métricas. Selecciona más métricas o usa 'Gráfico de Barras'.")
-                        st.stop()
+                if len(metricas_comparar) < 3 and tipo_viz == 'Radar/Spider Chart':
+                    st.warning("⚠️ Radar requiere 3+ métricas")
+                    st.stop()
                             
             st.markdown("---")
             
-            # ========================================
-            # GENERAR VISUALIZACIÓN
-            # ========================================
-            
+            # ===== RADAR CHART =====
             if tipo_viz == 'Radar/Spider Chart':
-                st.subheader("🕸️ Radar Chart - Perfiles Comparativos")
+                st.subheader("🕸️ Radar Chart")
                 
-                # Info sobre el radar
-                st.markdown("**Radar profesional con escalas independientes por métrica:**")
+                # Limitar número de elementos
+                if len(df_comparacion) > 6:
+                    st.warning(f"⚠️ Demasiados elementos ({len(df_comparacion)}) para Radar Chart. Mostrando solo los primeros 6.")
+                    df_comparacion = df_comparacion.head(6)
                 
-                # Calcular min-max para CADA métrica entre los seleccionados
                 rangos_metricas = {}
                 for metrica in metricas_comparar:
                     valores = df_comparacion[metrica]
@@ -999,32 +927,31 @@ def main():
                         'max': valores.max()
                     }
                 
-                # Preparar datos para mplsoccer
                 params = [metricas_disponibles[m] for m in metricas_comparar]
                 low = [rangos_metricas[m]['min'] for m in metricas_comparar]
                 high = [rangos_metricas[m]['max'] for m in metricas_comparar]
                 
-                # Valores de cada jugador
                 valores_jugadores = []
                 nombres_jugadores = []
+                
                 for idx, (df_idx, row) in enumerate(df_comparacion.iterrows()):
                     valores = [row[m] for m in metricas_comparar]
                     valores_jugadores.append(valores)
                     nombres_jugadores.append(row['nombre'])
                 
-                # Colores para cada jugador
-                colores_radar = [
-                    {'face': '#1E88E5', 'edge': '#0D47A1'},  # Azul
-                    {'face': '#FF6F00', 'edge': '#E65100'},  # Naranja
-                    {'face': '#43A047', 'edge': '#1B5E20'}   # Verde
+                colores_individuales = [
+                    {'face': '#1E88E5', 'edge': '#0D47A1'},
+                    {'face': '#FF6F00', 'edge': '#E65100'},
+                    {'face': '#43A047', 'edge': '#1B5E20'},
+                    {'face': '#E53935', 'edge': '#C62828'},
+                    {'face': '#8E24AA', 'edge': '#6A1B9A'},
+                    {'face': '#00ACC1', 'edge': '#00838F'}
                 ]
                 
                 try:
-                    # Importar mplsoccer
                     from mplsoccer import Radar
                     import matplotlib.pyplot as plt
                     
-                    # Crear radar
                     radar = Radar(
                         params, 
                         low, 
@@ -1035,14 +962,9 @@ def main():
                         center_circle_radius=1
                     )
                     
-                    # Crear figura con tamaño reducido y alta resolución
-                    fig, ax = radar.setup_axis(
-                        figsize=(8, 8),      # Más compacto (antes era default ~12x12)
-                        facecolor='white'
-                    )
-                    fig.set_dpi(150)         # Alta resolución (150 DPI)
+                    fig, ax = radar.setup_axis(figsize=(9, 9), facecolor='white')
+                    fig.set_dpi(150)
                     
-                    # Dibujar círculos de fondo
                     rings_inner = radar.draw_circles(
                         ax=ax, 
                         facecolor='#f0f0f0', 
@@ -1050,27 +972,23 @@ def main():
                         linewidth=1
                     )
                     
-                    # Dibujar cada jugador
                     vertices_list = []
                     for idx, valores in enumerate(valores_jugadores):
-                        if idx < len(colores_radar):
-                            color = colores_radar[idx]
-                            
-                            # Dibujar área rellena
-                            radar_poly, vertices = radar.draw_radar_solid(
-                                valores, 
-                                ax=ax,
-                                kwargs={
-                                    'facecolor': color['face'],
-                                    'alpha': 0.4,
-                                    'edgecolor': color['edge'],
-                                    'lw': 2.5  # Ligeramente más fino
-                                }
-                            )
-                            
-                            vertices_list.append((vertices, color))
+                        color = colores_individuales[idx % len(colores_individuales)]
+                        
+                        radar_poly, vertices = radar.draw_radar_solid(
+                            valores, 
+                            ax=ax,
+                            kwargs={
+                                'facecolor': color['face'],
+                                'alpha': 0.35,
+                                'edgecolor': color['edge'],
+                                'lw': 2.5
+                            }
+                        )
+                        
+                        vertices_list.append((vertices, color))
                     
-                    # Dibujar puntos en los vértices (más pequeños)
                     for vertices, color in vertices_list:
                         ax.scatter(
                             vertices[:, 0], 
@@ -1078,33 +996,32 @@ def main():
                             c=color['face'], 
                             edgecolors=color['edge'], 
                             marker='o', 
-                            s=100,  # Reducido de 150 a 100
+                            s=100,
                             zorder=2,
                             linewidth=1.5
                         )
                     
-                    # Etiquetas de rango (más pequeñas)
                     range_labels = radar.draw_range_labels(ax=ax, fontsize=8)
-                    
-                    # Etiquetas de parámetros (más pequeñas)
                     param_labels = radar.draw_param_labels(ax=ax, fontsize=10)
                     
-                    # Título (más compacto) con estadístico
                     title_text = f"Comparativa ({estadistico_comparar}): {', '.join(nombres_jugadores[:3])}"
+                    if len(nombres_jugadores) > 3:
+                        title_text += f" (+{len(nombres_jugadores)-3} más)"
+                    
                     ax.text(
                         0.5, 1.12, title_text,
                         horizontalalignment='center',
                         verticalalignment='center',
                         transform=ax.transAxes,
-                        fontsize=12,
+                        fontsize=11,
                         fontweight='bold'
                     )
                     
-                    # Leyenda (más compacta)
+                    # Leyenda
                     legend_elements = []
-                    for idx, nombre in enumerate(nombres_jugadores[:3]):
-                        color = colores_radar[idx]
-                        from matplotlib.patches import Patch
+                    from matplotlib.patches import Patch
+                    for idx, nombre in enumerate(nombres_jugadores):
+                        color = colores_individuales[idx % len(colores_individuales)]
                         legend_elements.append(
                             Patch(facecolor=color['face'], edgecolor=color['edge'], 
                                   label=nombre, linewidth=1.5)
@@ -1116,59 +1033,23 @@ def main():
                         bbox_to_anchor=(0.5, -0.08),
                         ncol=3,
                         frameon=False,
-                        fontsize=9
+                        fontsize=8
                     )
                     
-                    # Ajustar layout para que no se corten elementos
                     plt.tight_layout()
-                    
-                    # ========================================
-                    # EXPORTACIÓN: Para PDF futuro
-                    # Variables disponibles:
-                    # - fig: Figura matplotlib completa
-                    # - radar: Objeto Radar configurado
-                    # - valores_jugadores: Lista con valores de cada jugador
-                    # - nombres_jugadores: Lista con nombres
-                    # - params: Lista con nombres de métricas
-                    # - low, high: Rangos de cada métrica
-                    # 
-                    # Para guardar: fig.savefig('radar.png', dpi=300, bbox_inches='tight')
-                    # ========================================
-                    
-                    # Mostrar en Streamlit
-                    st.pyplot(fig, use_container_width=False)  # No usar ancho completo
+                    st.pyplot(fig, use_container_width=False)
                     plt.close()
                     
-                    # Explicación
-                    st.info("""
-                    📊 **Cómo interpretar:** 
-                    - **Escalas independientes:** Cada eje tiene su propio rango (min-max entre los seleccionados)
-                    - **Áreas coloreadas:** Cada jugador tiene su color distintivo
-                    - **Puntos en vértices:** Marcan el valor exacto de cada métrica
-                    - **Anillos concéntricos:** Ayudan a leer los valores en cada eje
-                    - **Área mayor = mejor rendimiento** en ese conjunto de métricas
-                    """)
-                    
                 except ImportError:
-                    st.error("""
-                    ⚠️ **mplsoccer no está instalado**
-                    
-                    Para usar el Radar Chart profesional, necesitas instalar mplsoccer:
-                    
-                    ```bash
-                    pip install mplsoccer --break-system-packages
-                    ```
-                    
-                    Luego reinicia la aplicación.
-                    """)
+                    st.error("⚠️ mplsoccer no está instalado. Usa: pip install mplsoccer")
                 except Exception as e:
-                    st.error(f"Error al crear el radar: {str(e)}")
-                    st.write("**Debug info:**", e)
-                
-            elif tipo_viz == "heatmap": 
+                    st.error(f"Error: {str(e)}")
+            
+            # ===== HEATMAP =====
+            elif tipo_viz == 'Heatmap':
                 st.subheader("🌡️ Heatmap - Tabla de Calor")
                 
-                # Preparar matriz para heatmap
+                # Crear el gráfico primero
                 matriz = []
                 nombres = []
                 
@@ -1179,8 +1060,7 @@ def main():
                 
                 nombres_metricas = [metricas_disponibles[m] for m in metricas_comparar]
                 
-                # Normalizar por columna (métrica) para comparabilidad
-                matriz_norm = np.array(matriz).T  # Transponer
+                matriz_norm = np.array(matriz).T
                 matriz_norm_scaled = []
                 
                 for i, metrica_vals in enumerate(matriz_norm):
@@ -1194,76 +1074,97 @@ def main():
                     
                     matriz_norm_scaled.append(norm_vals)
                 
-                matriz_norm_scaled = np.array(matriz_norm_scaled).T  # Volver a transponer
+                matriz_norm_scaled = np.array(matriz_norm_scaled).T
                 
-                # Crear heatmap
                 fig = go.Figure(data=go.Heatmap(
                     z=matriz_norm_scaled,
                     x=nombres_metricas,
                     y=nombres,
-                    colorscale='RdYlGn',  # Rojo-Amarillo-Verde
+                    colorscale='RdYlGn',
                     text=np.array(matriz).round(1),
                     texttemplate='%{text}',
-                    textfont={"size": 12},
+                    textfont={"size": 10 if len(nombres) > 5 else 12},
                     colorbar=dict(
-                        title="Escala<br>0-100",
+                        title="Escala<br>Normalizada",
                         tickvals=[0, 25, 50, 75, 100],
-                        ticktext=['Bajo', '25', '50', '75', 'Alto']
+                        ticktext=['Bajo<br>(0)', '25', 'Medio<br>(50)', '75', 'Alto<br>(100)']
                     ),
-                    hovertemplate='<b>%{y}</b><br>' +
-                                '<b>%{x}</b><br>' +
-                                'Valor: %{text}<br>' +
-                                'Normalizado: %{z:.1f}/100<br>' +
-                                '<extra></extra>'
+                    hovertemplate='<b>%{y}</b><br><b>%{x}</b><br>Valor real: %{text}<br>Normalizado: %{z:.1f}/100<br><extra></extra>'
                 ))
                 
                 fig.update_layout(
-                    title=f"Comparativa de Métricas ({estadistico_comparar}) - Colores normalizados, valores reales mostrados",
-                    height=max(300, len(nombres) * 80),
+                    title=f"Heatmap ({estadistico_comparar}) - {modo_comparar}",
+                    height=max(400, len(nombres) * 35),
                     xaxis_title="Métrica",
-                    yaxis_title=modo_comparar.split()[0]  # "Jugadores" o "Posiciones"
+                    yaxis_title="Jugador" if modo_comparar != 'Posiciones (promedio)' else "Posición"
                 )
-                
-                # ========================================
-                # EXPORTACIÓN: Para PDF futuro
-                # Variables disponibles:
-                # - fig: Figura Plotly (heatmap)
-                # - matriz: Valores reales [[val1, val2, ...], ...]
-                # - matriz_norm_scaled: Valores normalizados 0-100
-                # - nombres: Lista de nombres (jugadores/posiciones)
-                # - nombres_metricas: Lista de nombres de métricas
-                # - df_tabla_valores: DataFrame con valores para tabla
-                # 
-                # Para guardar: fig.write_image('heatmap.png', width=1200, height=800)
-                # ========================================
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Explicación
-                st.info("""
-                🌡️ **Cómo interpretar:**
-                - 🟢 Verde = Alto rendimiento en esa métrica (entre los seleccionados)
-                - 🟡 Amarillo = Rendimiento medio
-                - 🔴 Rojo = Bajo rendimiento en esa métrica
-                - Los números muestran los **valores reales**, los colores están normalizados para comparar
-                """)
+                # CORREGIDO: Explicación DESPUÉS del gráfico
+                with st.expander("📖 ¿Cómo interpretar el Heatmap?"):
+                    st.markdown("""
+                    **📊 Interpretación de colores:**
+                    
+                    - **🟢 Verde (75-100)**: Rendimiento **excelente** en esa métrica (entre los mejores del grupo)
+                    - **🟡 Amarillo (50-75)**: Rendimiento **bueno** (por encima del promedio)
+                    - **🟠 Naranja (25-50)**: Rendimiento **medio-bajo** (por debajo del promedio)
+                    - **🔴 Rojo (0-25)**: Rendimiento **bajo** (entre los más bajos del grupo)
+                    
+                    **⚙️ Cálculo de colores (normalización por columna):**
+                    
+                    1. Para cada métrica, se identifica el **valor mínimo** y **máximo** entre los seleccionados
+                    2. Cada valor se convierte a escala 0-100 según su posición entre mín-máx
+                    3. **Números** = valores reales (ej: 650m de HSR)
+                    4. **Colores** = cómo se compara con el resto en esa métrica
+                    
+                    **💡 Ejemplo:**
+                    - Jugador A: 650 HSR → Máximo del grupo → Verde (100/100)
+                    - Jugador B: 525 HSR → Punto medio → Amarillo (~50/100)
+                    - Jugador C: 400 HSR → Mínimo del grupo → Rojo (0/100)
+                    
+                    **👁️ Ventaja del Heatmap:**
+                    Permite comparar métricas con escalas muy diferentes (ej: sprints ~30 vs distancia ~8000) en la misma visualización.
+                    """)
             
-            else:  # Gráfico de Barras
+            # ===== GRÁFICO DE BARRAS =====
+            else:
                 st.subheader("📊 Gráfico de Barras - Comparación Directa")
                 
-                # Preparar datos
                 nombres = []
+                grupos = []
                 datos_por_metrica = {metricas_disponibles[m]: [] for m in metricas_comparar}
                 
                 for idx, (df_idx, row) in enumerate(df_comparacion.iterrows()):
                     nombres.append(row['nombre'])
+                    grupos.append(row.get('grupo', row['nombre']))
                     for metrica in metricas_comparar:
                         datos_por_metrica[metricas_disponibles[metrica]].append(row[metrica])
                 
-                # Colores para cada jugador (consistentes)
-                colores_jugadores = ['#1E88E5', '#FF6F00', '#43A047', '#E53935', '#8E24AA']
+                # Colores según grupo
+                colores_grupo = {
+                    'Defensa': '#ef4444',
+                    'Centrocampista': '#3b82f6',
+                    'Delantero': '#22c55e'
+                }
                 
-                # Crear subplots (una columna por métrica)
+                colores_individuales = ['#1E88E5', '#FF6F00', '#43A047', '#E53935', '#8E24AA', '#00ACC1']
+                
+                # CORREGIDO: Si solo hay una posición seleccionada, usar colores individuales
+                posiciones_unicas = len(set(grupos))
+                
+                if modo_comparar == 'Jugadores por posición' and posiciones_unicas == 1:
+                    # Una sola posición → colores individuales por jugador
+                    colores_jugadores = [colores_individuales[i % len(colores_individuales)] for i in range(len(nombres))]
+                    usar_nombres_en_eje = True
+                elif modo_comparar == 'Jugadores por posición':
+                    # Múltiples posiciones → color por posición
+                    colores_jugadores = [colores_grupo.get(g, '#9ca3af') for g in grupos]
+                    usar_nombres_en_eje = False
+                else:
+                    colores_jugadores = [colores_individuales[i % len(colores_individuales)] for i in range(len(nombres))]
+                    usar_nombres_en_eje = False
+                
                 from plotly.subplots import make_subplots
                 
                 n_metricas = len(metricas_comparar)
@@ -1272,108 +1173,90 @@ def main():
                     rows=1, 
                     cols=n_metricas,
                     subplot_titles=[metricas_disponibles[m] for m in metricas_comparar],
-                    horizontal_spacing=0.08,
+                    horizontal_spacing=0.10,
                     specs=[[{"type": "bar"}] * n_metricas]
                 )
                 
-                # Para cada métrica, crear un subplot
+                # CORREGIDO: Si hay una sola posición, mostrar nombres en el eje X
                 for col_idx, (metrica, metrica_nombre) in enumerate(datos_por_metrica.items(), start=1):
-                    valores = metrica_nombre
                     
-                    # Añadir barras de cada jugador en este subplot
                     for jug_idx, (nombre, valor) in enumerate(zip(nombres, datos_por_metrica[metrica])):
                         fig.add_trace(
                             go.Bar(
                                 name=nombre,
-                                x=[metrica],
+                                x=[nombre if usar_nombres_en_eje else metrica],
                                 y=[valor],
                                 text=[f"{valor:.1f}"],
                                 textposition='outside',
-                                marker_color=colores_jugadores[jug_idx % len(colores_jugadores)],
-                                showlegend=(col_idx == 1),  # Solo mostrar leyenda en primer subplot
-                                legendgroup=nombre,  # Agrupar para leyenda consistente
-                                hovertemplate=f'<b>{nombre}</b><br>' +
-                                              f'{metrica}: %{{y:.1f}}<br>' +
-                                              '<extra></extra>'
+                                marker_color=colores_jugadores[jug_idx],
+                                showlegend=False,
+                                legendgroup=nombre,
+                                hovertemplate=f'<b>{nombre}</b><br>{metrica}: %{{y:.1f}}<br><extra></extra>'
                             ),
                             row=1,
                             col=col_idx
                         )
                 
-                # Aplicar tamaño de texto
                 fig.update_traces(
-                    textfont=dict(size=13, color='black'),
+                    textfont=dict(size=11, color='black'),
                     textposition='outside',
                     selector=dict(type='bar')
                 )
                 
-                # Layout general
                 fig.update_layout(
-                    title=f"Comparativa de Métricas ({estadistico_comparar}) - Escalas Independientes",
+                    title=f"Comparativa ({estadistico_comparar}) - {modo_comparar}",
                     height=500,
                     barmode='group',
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=-0.15,
-                        xanchor="center",
-                        x=0.5
-                    ),
-                    uniformtext_minsize=12,
+                    showlegend=False,
+                    uniformtext_minsize=10,
                     uniformtext_mode='show'
                 )
                 
-                # Ocultar etiquetas del eje X (ya están en títulos de subplot)
-                fig.update_xaxes(showticklabels=False)
+                # CORREGIDO: Rotar etiquetas del eje X si son nombres
+                if usar_nombres_en_eje:
+                    for i in range(1, n_metricas + 1):
+                        fig.update_xaxes(
+                            tickangle=-45,
+                            tickfont=dict(size=9),
+                            row=1,
+                            col=i
+                        )
+                else:
+                    fig.update_xaxes(showticklabels=False)
                 
-                # Configurar ejes Y independientes
                 for i in range(1, n_metricas + 1):
                     fig.update_yaxes(title_text="Valor", row=1, col=i)
                 
                 st.plotly_chart(fig, use_container_width=True)
-                
-                # Explicación
-                st.info("""
-                📊 **Cómo interpretar:**
-                - Cada panel muestra una métrica diferente con su **propia escala**
-                - Cada color representa un jugador/posición (consistente entre paneles)
-                - Las **escalas son independientes**: sprints ~30 y distancia ~8000 se ven proporcionadas
-                - Los números sobre las barras muestran los valores exactos
-                - **Ideal para comparar múltiples métricas sin distorsión visual**
-                """)
-                
-            # Tabla de valores reales
+            
+            # Tabla de valores
             st.subheader("📊 Tabla de Valores Reales")
             
             df_tabla_valores = df_comparacion[['nombre'] + metricas_comparar].copy()
-            df_tabla_valores.columns = ['Elemento'] + [metricas_disponibles[m] for m in metricas_comparar]
             
-            # Formatear números
-            for col in df_tabla_valores.columns[1:]:
+            # Añadir columna de grupo si es "Por posición"
+            if modo_comparar == 'Jugadores por posición':
+                df_tabla_valores.insert(1, 'Posición', df_comparacion['grupo'])
+            
+            df_tabla_valores.columns = ['Jugador'] + (['Posición'] if modo_comparar == 'Jugadores por posición' else []) + [metricas_disponibles[m] for m in metricas_comparar]
+            
+            for col in df_tabla_valores.columns[1:] if modo_comparar != 'Jugadores por posición' else df_tabla_valores.columns[2:]:
                 df_tabla_valores[col] = df_tabla_valores[col].round(1)
             
-            st.dataframe(
-                df_tabla_valores,
-                use_container_width=True,
-                hide_index=True
-            )
-
-
+            st.dataframe(df_tabla_valores, use_container_width=True, hide_index=True, height=min(400, len(df_tabla_valores) * 35 + 50))
     
-   # ========================================
+    # ========================================
     # TAB 3: EVOLUCIÓN TEMPORAL
     # ========================================
     
     with tab3:
-        st.subheader("📉 Evolución Temporal del Equipo")
+        st.subheader("📉 Evolución Temporal")
         
-        # Opciones de visualización
         col1, col2 = st.columns(2)
         
         with col1:
             metrica_evol = st.selectbox(
-                "Métrica a visualizar:",
+                "Métrica:",
                 options=list(metricas_disponibles.keys()),
                 format_func=lambda x: metricas_disponibles[x],
                 key='metrica_evolucion'
@@ -1382,89 +1265,32 @@ def main():
         with col2:
             tipo_linea = st.selectbox(
                 "Mostrar:",
-                options=['Media del equipo', 'Por posición', 'Top 5 jugadores', 'Todos los jugadores', 'Selección manual'],
+                options=['Media del equipo', 'Top 5 jugadores'],
                 index=0,
                 key='tipo_linea_evol'
             )
         
-        # Si es selección manual, mostrar selector de jugadores
-        jugadores_seleccionados_evol = None
-        if tipo_linea == 'Selección manual':
-            jugadores_disponibles_evol = sorted(df_filtrado['player'].unique())
-            
-            jugadores_seleccionados_evol = st.multiselect(
-                "Seleccionar jugadores (máximo 5):",
-                options=jugadores_disponibles_evol,
-                default=jugadores_disponibles_evol[:min(3, len(jugadores_disponibles_evol))],
-                max_selections=5,
-                key='jugadores_evol_manual',
-                help="Máximo 5 jugadores para mantener el gráfico legible"
-            )
-            
-            if len(jugadores_seleccionados_evol) == 0:
-                st.warning("⚠️ Selecciona al menos 1 jugador")
-                st.stop()
-        
         metrica_evol_nombre = metricas_disponibles[metrica_evol]
         
-        # Preparar datos temporales
         df_temporal = df_filtrado.copy()
         df_temporal = df_temporal.sort_values('date')
         
-        # Crear figura
         fig = go.Figure()
         
         if tipo_linea == 'Media del equipo':
-            # Calcular media por fecha
             df_media = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
             df_media = df_media.sort_values('date')
             
             fig.add_trace(go.Bar(
                 x=df_media['date'],
                 y=df_media[metrica_evol],
-                name='Media del equipo',
+                name='Media',
                 marker_color=COLORES['primario'],
                 text=[f"{v:.1f}" for v in df_media[metrica_evol]],
                 textposition='outside',
-                hovertemplate='<b>%{x|%d/%m/%Y}</b><br>' +
-                             f'Media: %{{y:.1f}}<extra></extra>'
+                hovertemplate='<b>%{x|%d/%m/%Y}</b><br>Media: %{y:.1f}<extra></extra>'
             ))
-            
-        elif tipo_linea == 'Por posición':
-            # Cargar posiciones
-            try:
-                df_plantilla = cargar_plantilla_europa()
-                df_temporal['posicion'] = df_temporal['player'].apply(
-                    lambda x: mapear_posicion(x, df_plantilla)
-                )
-                
-                posiciones = df_temporal['posicion'].unique()
-                colores_pos = {
-                    'Defensa': '#ef4444',
-                    'Centrocampista': '#3b82f6',
-                    'Delantero': '#22c55e'
-                }
-                
-                for pos in posiciones:
-                    if pos in colores_pos:
-                        df_pos = df_temporal[df_temporal['posicion'] == pos]
-                        df_pos_media = df_pos.groupby('date')[metrica_evol].mean().reset_index()
-                        df_pos_media = df_pos_media.sort_values('date')
-                        
-                        fig.add_trace(go.Bar(
-                            x=df_pos_media['date'],
-                            y=df_pos_media[metrica_evol],
-                            name=pos,
-                            marker_color=colores_pos[pos],
-                            text=[f"{v:.1f}" for v in df_pos_media[metrica_evol]],
-                            textposition='outside',
-                            hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{pos}: %{{y:.1f}}<extra></extra>'
-                        ))
-            except:
-                st.warning("⚠️ No se pudo cargar información de posiciones")
-                
-        elif tipo_linea == 'Top 5 jugadores':
-            # Obtener top 5 jugadores por promedio
+        else:
             df_promedios = df_temporal.groupby('player')[metrica_evol].mean().sort_values(ascending=False).head(5)
             
             for jugador in df_promedios.index:
@@ -1479,166 +1305,25 @@ def main():
                     hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{jugador}: %{{y:.1f}}<extra></extra>'
                 ))
         
-        elif tipo_linea == 'Todos los jugadores':
-            jugadores = df_temporal['player'].unique()
-            
-            if len(jugadores) > 15:
-                st.warning(f"⚠️ Hay {len(jugadores)} jugadores. El gráfico puede ser difícil de leer. Considera usar 'Top 5 jugadores'.")
-            
-            for jugador in jugadores:
-                df_jug = df_temporal[df_temporal['player'] == jugador].sort_values('date')
-                
-                fig.add_trace(go.Bar(
-                    x=df_jug['date'],
-                    y=df_jug[metrica_evol],
-                    name=jugador,
-                    text=[f"{v:.0f}" for v in df_jug[metrica_evol]],
-                    textposition='outside',
-                    hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{jugador}: %{{y:.1f}}<extra></extra>',
-                    opacity=0.8
-                ))
-        
-        else:  # Selección manual
-            if jugadores_seleccionados_evol:
-                for jugador in jugadores_seleccionados_evol:
-                    df_jug = df_temporal[df_temporal['player'] == jugador].sort_values('date')
-                    
-                    if len(df_jug) > 0:
-                        fig.add_trace(go.Bar(
-                            x=df_jug['date'],
-                            y=df_jug[metrica_evol],
-                            name=jugador,
-                            text=[f"{v:.1f}" for v in df_jug[metrica_evol]],
-                            textposition='outside',
-                            hovertemplate=f'<b>%{{x|%d/%m/%Y}}</b><br>{jugador}: %{{y:.1f}}<extra></extra>'
-                        ))
-        
-        # Aplicar update_traces para texto
         fig.update_traces(
             textfont=dict(size=12, color='black'),
             textposition='outside',
             selector=dict(type='bar')
         )
         
-        # Layout del gráfico
         fig.update_layout(
-            title=f"Evolución de {metrica_evol_nombre} - {tipo_linea}",
+            title=f"Evolución de {metrica_evol_nombre}",
             xaxis_title="Fecha",
             yaxis_title=metrica_evol_nombre,
             height=600,
             hovermode='x unified',
             barmode='group',
-            xaxis=dict(
-                tickformat='%d/%m',
-                tickangle=-45
-            ),
+            xaxis=dict(tickformat='%d/%m', tickangle=-45),
             uniformtext_minsize=11,
             uniformtext_mode='show'
         )
         
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Estadísticas de tendencia
-        st.subheader("📊 Análisis de Tendencia")
-        
-        # Calcular tendencia según el tipo de visualización
-        if tipo_linea == 'Media del equipo':
-            # Media del equipo
-            df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
-            df_trend = df_trend.sort_values('date')
-            nombre_serie = "Media del equipo"
-            
-        elif tipo_linea == 'Por posición':
-            # Calcular tendencia promediando todas las posiciones
-            try:
-                df_plantilla = cargar_plantilla_europa()
-                df_temporal['posicion'] = df_temporal['player'].apply(
-                    lambda x: mapear_posicion(x, df_plantilla)
-                )
-                df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
-                df_trend = df_trend.sort_values('date')
-                nombre_serie = "Media de todas las posiciones"
-            except:
-                df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
-                df_trend = df_trend.sort_values('date')
-                nombre_serie = "Media del equipo"
-                
-        elif tipo_linea == 'Top 5 jugadores':
-            # Solo los Top 5 jugadores
-            df_promedios = df_temporal.groupby('player')[metrica_evol].mean().sort_values(ascending=False).head(5)
-            top5_jugadores = df_promedios.index.tolist()
-            df_temp_top5 = df_temporal[df_temporal['player'].isin(top5_jugadores)]
-            df_trend = df_temp_top5.groupby('date')[metrica_evol].mean().reset_index()
-            df_trend = df_trend.sort_values('date')
-            nombre_serie = f"Media Top 5: {', '.join(top5_jugadores)}"
-            
-        elif tipo_linea == 'Selección manual':
-            # Solo los jugadores seleccionados
-            if jugadores_seleccionados_evol and len(jugadores_seleccionados_evol) > 0:
-                df_temp_sel = df_temporal[df_temporal['player'].isin(jugadores_seleccionados_evol)]
-                df_trend = df_temp_sel.groupby('date')[metrica_evol].mean().reset_index()
-                df_trend = df_trend.sort_values('date')
-                nombre_serie = f"Media seleccionados: {', '.join(jugadores_seleccionados_evol)}"
-            else:
-                df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
-                df_trend = df_trend.sort_values('date')
-                nombre_serie = "Media del equipo"
-                
-        else:  # Todos los jugadores
-            df_trend = df_temporal.groupby('date')[metrica_evol].mean().reset_index()
-            df_trend = df_trend.sort_values('date')
-            nombre_serie = "Media de todos los jugadores"
-        
-        if len(df_trend) >= 2:
-            valor_inicial = df_trend[metrica_evol].iloc[0]
-            valor_final = df_trend[metrica_evol].iloc[-1]
-            cambio = valor_final - valor_inicial
-            cambio_pct = (cambio / valor_inicial * 100) if valor_inicial != 0 else 0
-            
-            # Mostrar de qué jugadores se calcula la tendencia
-            st.caption(f"📍 Calculado sobre: **{nombre_serie}**")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "Valor Inicial",
-                    f"{valor_inicial:.1f}",
-                    delta=None,
-                    help=f"Fecha: {df_trend['date'].iloc[0].strftime('%d/%m/%Y')}"
-                )
-            
-            with col2:
-                st.metric(
-                    "Valor Actual",
-                    f"{valor_final:.1f}",
-                    delta=None,
-                    help=f"Fecha: {df_trend['date'].iloc[-1].strftime('%d/%m/%Y')}"
-                )
-            
-            with col3:
-                st.metric(
-                    "Cambio Absoluto",
-                    f"{cambio:+.1f}",
-                    delta=f"{cambio_pct:+.1f}%"
-                )
-            
-            with col4:
-                tendencia = "📈 Mejorando" if cambio > 0 else "📉 Disminuyendo" if cambio < 0 else "➡️ Estable"
-                st.metric(
-                    "Tendencia",
-                    tendencia,
-                    delta=None
-                )
-            
-            # Interpretación
-            if abs(cambio_pct) >= 10:
-                st.success(f"✅ Cambio significativo: {cambio_pct:+.1f}% en {metrica_evol_nombre}")
-            elif abs(cambio_pct) >= 5:
-                st.info(f"ℹ️ Cambio moderado: {cambio_pct:+.1f}% en {metrica_evol_nombre}")
-            else:
-                st.info(f"➡️ Cambio leve: {cambio_pct:+.1f}% en {metrica_evol_nombre}")
-
 
 
 if __name__ == "__main__":

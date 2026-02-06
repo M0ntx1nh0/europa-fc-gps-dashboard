@@ -1,0 +1,131 @@
+"""
+Módulo de filtros reutilizables para todas las páginas
+"""
+
+import streamlit as st
+import pandas as pd
+from datetime import timedelta
+from utils import filtrar_por_fechas
+
+
+def render_filtro_partidos(df, titulo="🎯 Filtros de Partido"):
+    """
+    Renderiza el filtro de partidos independiente para cada página
+    ...
+    """
+    
+    # CRÍTICO: Inicializar fechas si no existen
+    if 'fecha_desde' not in st.session_state or st.session_state.fecha_desde is None:
+        st.session_state.fecha_desde = pd.to_datetime(df['date'].min())
+    if 'fecha_hasta' not in st.session_state or st.session_state.fecha_hasta is None:
+        st.session_state.fecha_hasta = pd.to_datetime(df['date'].max())
+    
+    # Obtener fechas del session_state (ya son datetime)
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+    
+    # Filtrar por rango general
+    
+    df_rango = filtrar_por_fechas(df, fecha_desde, fecha_hasta)
+    
+    # Obtener fechas disponibles
+    fechas_disponibles = sorted(df_rango['date'].unique())
+    
+    if len(fechas_disponibles) == 0:
+        st.error("⚠️ No hay partidos disponibles en el rango seleccionado")
+        st.stop()
+    
+    # ========================================
+    # INTERFAZ DE FILTROS
+    # ========================================
+    
+    st.subheader(titulo)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        modo_partido = st.radio(
+            "Modo de selección:",
+            options=['Partido Específico', 'Últimos N partidos', 'Rango de Fechas'],
+            key='modo_partido_filtro'
+        )
+    
+    with col2:
+        if modo_partido == 'Partido Específico':
+            partido_sel = st.selectbox(
+                "Seleccionar partido:",
+                options=fechas_disponibles,
+                index=len(fechas_disponibles)-1,
+                format_func=lambda x: x.strftime('%d/%m/%Y'),
+                key='partido_especifico_filtro'
+            )
+            df_filtrado = df_rango[df_rango['date'] == partido_sel].copy()
+            
+            info_dict = {
+                'partido_seleccionado': partido_sel,
+                'n_partidos': 1,
+                'fecha_inicio': partido_sel,
+                'fecha_fin': partido_sel
+            }
+            
+        elif modo_partido == 'Últimos N partidos':
+            n_partidos = st.selectbox(
+                "Últimos N partidos:",
+                options=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                index=2,  # Default: 3
+                key='n_partidos_filtro'
+            )
+            fechas_recientes = fechas_disponibles[-n_partidos:]
+            df_filtrado = df_rango[df_rango['date'].isin(fechas_recientes)].copy()
+            
+            info_dict = {
+                'n_partidos': n_partidos,
+                'fecha_inicio': fechas_recientes[0],
+                'fecha_fin': fechas_recientes[-1],
+                'fechas_incluidas': fechas_recientes
+            }
+            
+        else:  # Rango de Fechas
+            fecha_min = df_rango['date'].min()
+            fecha_max = df_rango['date'].max()
+            
+            fecha_inicio = st.date_input(
+                "Fecha inicio:",
+                value=fecha_max - timedelta(days=30),
+                min_value=fecha_min,
+                max_value=fecha_max,
+                key='fecha_inicio_filtro'
+            )
+            df_filtrado = df_rango[df_rango['date'] >= pd.to_datetime(fecha_inicio)].copy()
+            
+            info_dict = {
+                'fecha_inicio': pd.to_datetime(fecha_inicio),
+                'n_partidos': len(df_filtrado['date'].unique())
+            }
+    
+    with col3:
+        if modo_partido == 'Rango de Fechas':
+            fecha_min = df_rango['date'].min()
+            fecha_max = df_rango['date'].max()
+            
+            fecha_fin = st.date_input(
+                "Fecha fin:",
+                value=fecha_max,
+                min_value=fecha_min,
+                max_value=fecha_max,
+                key='fecha_fin_filtro'
+            )
+            df_filtrado = df_filtrado[df_filtrado['date'] <= pd.to_datetime(fecha_fin)].copy()
+            
+            info_dict['fecha_fin'] = pd.to_datetime(fecha_fin)
+            info_dict['n_partidos'] = len(df_filtrado['date'].unique())
+        
+        # Métrica de resumen
+        st.metric(
+            "Partidos seleccionados",
+            info_dict.get('n_partidos', len(df_filtrado['date'].unique()))
+        )
+    
+    st.markdown("---")
+    
+    return df_filtrado, modo_partido, info_dict

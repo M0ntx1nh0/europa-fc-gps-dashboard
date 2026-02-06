@@ -1,16 +1,35 @@
-streamlit==1.41.1
-pandas==2.2.3
-numpy==1.26.4
-plotly==5.24.1
-openpyxl==3.1.5
-matplotlib==3.9.3
-seaborn==0.13.2
-Pillow==11.1.0
-mplsoccer==1.4.1
-fpdf2==2.7.9
-PyDrive2==1.20.0
-google-auth==2.23.0
-google-auth-oauthlib==1.1.0
+# ========================================
+# CORE - Streamlit y procesamiento de datos
+# ========================================
+streamlit>=1.29.0
+pandas>=2.2.0,<3.0.0
+numpy>=1.26.0,<2.0.0
+plotly>=5.18.0
+
+# ========================================
+# GOOGLE DRIVE INTEGRATION
+# ========================================
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
 google-auth-httplib2>=0.2.0
+google-api-python-client>=2.108.0
+PyDrive2>=1.20.0
+
+# ========================================
+# ARCHIVOS Y DOCUMENTOS
+# ========================================
+openpyxl>=3.1.0
+Pillow>=11.0.0
+fpdf2>=2.7.0
+
+# ========================================
+# VISUALIZACIÓN AVANZADA
+# ========================================
+matplotlib>=3.9.0
+mplsoccer>=1.4.0
+
+# ========================================
+# SEGURIDAD (requerido por Google Auth)
+# ========================================
 pyOpenSSL>=24.0.0
 cryptography>=42.0.0

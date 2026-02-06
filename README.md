@@ -1,274 +1,385 @@
-<<<<<<< HEAD
-# ⚽ Europa FC - Sistema de Análisis GPS
+# ⚽ Europa FC - Sistema de Análisis GPS v2.5.0
 
-Aplicación profesional de Streamlit para análisis de datos físicos de partidos.
+Aplicación profesional de Streamlit para análisis de datos GPS de jugadores del Europa FC.
+
+## ✨ Características
+
+- 🔐 **Sistema de autenticación** con contraseñas
+- 📁 **Integración con Google Drive** (carga automática de datos)
+- 📊 **Análisis por equipo** con player cards y tabs analíticos
+- 👤 **Análisis individual** con evolución temporal y comparativas
+- 📈 **Referencias normalizadas** a 94 minutos
+- 📄 **Exportación a PDF** de informes individuales
+- 🎨 **Interfaz moderna** con sidebar auto-ocultable
+
+---
 
 ## 📁 Estructura del Proyecto
-
 ```
 Europa_APP/
-├── venv/                          # Entorno virtual (crear localmente)
-├── data/                          # CSV de GPS (crear localmente)
-│   ├── total_report_*.csv
-│   └── ...
-├── utils/                         # Módulo de utilidades
-│   ├── __init__.py
-│   ├── data_loader.py            # Carga de CSV
-│   ├── data_processor.py         # Procesamiento
-│   └── calculations.py           # Cálculos y normalizaciones
-├── pages/                         # Páginas de la app
-│   ├── 1_🏠_Home.py              # Referencias normalizadas
-│   ├── 2_📊_Equipo.py            # Análisis de equipo
-│   └── 3_👤_Individual.py        # Análisis individual
-├── app.py                         # Aplicación principal
-├── config.py                      # Configuración centralizada
-├── requirements.txt               # Dependencias
-├── .gitignore
+├── app.py                          # Aplicación principal con autenticación
+├── config.py                       # Configuración centralizada
+├── requirements.txt                # Dependencias Python
+│
+├── pages/                          # Páginas Streamlit
+│   ├── 1_🏠_Home.py               # Referencias normalizadas
+│   ├── 2_📊_Equipo.py             # Análisis de equipo
+│   ├── 3_👤_Individual.py         # Análisis individual
+│   └── 4_📈_estatus_equipo.py     # Estado del equipo
+│
+├── utils/                          # Módulos de utilidades
+│   ├── __init__.py                # Exports principales
+│   ├── auth.py                    # Sistema de autenticación
+│   ├── sidebar.py                 # Sidebar con auto-ocultación
+│   ├── data_loader.py             # Carga desde Google Drive
+│   ├── data_processor.py          # Procesamiento de datos
+│   ├── calculations.py            # Cálculos y normalizaciones
+│   ├── filtros.py                 # Sistema de filtros reutilizable
+│   ├── plantilla.py               # Gestión de plantilla de jugadores
+│   ├── visualizations.py          # Gráficos y fotos
+│   └── pdf_*.py                   # Generadores de PDF
+│
+├── .streamlit/
+│   ├── config.toml                # Configuración de Streamlit
+│   └── secrets.toml.example       # Ejemplo de secrets (NO subir secrets.toml)
+│
+├── fotos_jugadores/               # Fotos de jugadores (opcional)
+├── informes_pdf/                  # PDFs generados (no subir)
 └── README.md                      # Este archivo
 ```
 
 ---
 
-## 🚀 Instalación y Configuración
+## 🚀 Instalación Local
 
-### **1. Crear la estructura en tu máquina:**
-
+### **1. Clonar el repositorio**
 ```bash
-# Navegar a la carpeta
-cd /Users/macmontxinho/Desktop/Teams/Europa
-
-# Crear carpeta del proyecto
-mkdir -p Europa_APP/data
-cd Europa_APP
+git clone https://github.com/TU_USUARIO/europa-gps-analytics.git
+cd europa-gps-analytics
 ```
 
-### **2. Copiar los archivos:**
-
-Copia todos los archivos de esta carpeta a `/Users/macmontxinho/Desktop/Teams/Europa/Europa_APP/`
-
-### **3. Crear entorno virtual:**
-
+### **2. Crear entorno virtual**
 ```bash
 # Crear entorno virtual
 python3 -m venv venv
 
 # Activar entorno virtual
-source venv/bin/activate  # En macOS/Linux
+source venv/bin/activate  # macOS/Linux
+# venv\Scripts\activate   # Windows
 ```
 
-### **4. Instalar dependencias:**
-
+### **3. Instalar dependencias**
 ```bash
 pip install -r requirements.txt
 ```
 
-### **5. Copiar archivos CSV a la carpeta data/:**
-
+### **4. Configurar secrets**
 ```bash
-# Copiar tus CSV a la carpeta data/
-cp /Users/macmontxinho/Desktop/Teams/Europa/Partidos/1er\ equipo/total_report_*.csv data/
+# Copiar ejemplo
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+
+# Editar con tus credenciales
+nano .streamlit/secrets.toml  # o cualquier editor
 ```
 
-O puedes crear un enlace simbólico:
+Ver sección **🔐 Configuración de Secrets** más abajo.
 
+### **5. Ejecutar la aplicación**
 ```bash
-# Crear enlace simbólico a la carpeta original
-ln -s "/Users/macmontxinho/Desktop/Teams/Europa/Partidos/1er equipo" data
-```
-
----
-
-## ▶️ Ejecutar la Aplicación
-
-```bash
-# Asegurarte de estar en la carpeta Europa_APP
-cd /Users/macmontxinho/Desktop/Teams/Europa/Europa_APP
-
-# Activar entorno virtual (si no está activado)
-source venv/bin/activate
-
-# Ejecutar la app
 streamlit run app.py
 ```
 
-La aplicación se abrirá automáticamente en: `http://localhost:8501`
+La app se abrirá en: `http://localhost:8501`
 
 ---
 
-## 📊 Cómo Usar la App
+## ☁️ Despliegue en Streamlit Cloud
 
-### **1. Cargar Datos:**
-- En el sidebar, haz clic en "🔄 Cargar/Recargar Datos"
-- La app cargará todos los CSV de la carpeta `data/`
-- Verás un mensaje de confirmación
+### **Paso 1: Preparar GitHub**
+```bash
+# Verificar que secrets.toml NO se suba
+git status  # NO debe aparecer secrets.toml
 
-### **2. Configurar Filtros:**
-- **Fechas:** Selecciona el rango que quieres analizar
-- **Partido:** Elige el partido específico
-- **Métrica:** Selecciona la métrica a visualizar
-
-### **3. Navegar por las Páginas:**
-
-#### **🏠 Home - Referencias**
-- Tabla de estadísticas normalizadas a 94 minutos
-- Solo jugadores con >60 minutos
-- Base de comparación para análisis
-
-#### **📊 Equipo**
-- Análisis del partido seleccionado
-- Comparación vs referencias
-- Evolución temporal del equipo
-
-#### **👤 Individual**
-- Ranking de jugadores
-- Evolución individual
-- Comparativas entre jugadores
-
----
-
-## 🔧 Configuración
-
-### **Cambiar carpeta de datos:**
-
-Edita `config.py`:
-
-```python
-# Rutas
-BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"  # ← Cambiar aquí
+# Commit y push
+git add .
+git commit -m "Deploy Europa FC GPS v2.5.0"
+git push origin main
 ```
 
-### **Añadir nuevas métricas:**
+### **Paso 2: Crear App en Streamlit Cloud**
+
+1. Ve a [share.streamlit.io](https://share.streamlit.io)
+2. Click en **"New app"**
+3. Conecta tu repositorio de GitHub
+4. Configuración:
+   - **Repository:** `tu-usuario/europa-gps-analytics`
+   - **Branch:** `main`
+   - **Main file path:** `app.py`
+
+### **Paso 3: Configurar Secrets**
+
+1. En Streamlit Cloud, ve a **Settings → Secrets**
+2. Copia el contenido completo de tu archivo local `.streamlit/secrets.toml`
+3. Pégalo en el editor de secrets
+4. Click en **Save**
+
+### **Paso 4: Deploy**
+
+1. Click en **Deploy!**
+2. Espera 2-3 minutos
+3. ¡Listo! Tu app estará disponible en `https://tu-app.streamlit.app`
+
+---
+
+## 🔐 Configuración de Secrets
+
+### **Estructura de `secrets.toml`**
+```toml
+# Autenticación de usuarios
+[passwords]
+admin = "tu_contraseña_segura"
+# Añade más usuarios aquí
+
+# Google Drive Service Account
+[google_service_account]
+type = "service_account"
+project_id = "tu-project-id"
+private_key_id = "tu-private-key-id"
+private_key = "-----BEGIN PRIVATE KEY-----\nTU_CLAVE_PRIVADA\n-----END PRIVATE KEY-----\n"
+client_email = "tu-service-account@proyecto.iam.gserviceaccount.com"
+client_id = "123456789"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/tu-service-account%40proyecto.iam.gserviceaccount.com"
+```
+
+### **Obtener credenciales de Google Drive**
+
+1. **Crear proyecto en Google Cloud Console:**
+   - Ve a [console.cloud.google.com](https://console.cloud.google.com)
+   - Crea un nuevo proyecto
+   - Nombre: "Europa FC GPS"
+
+2. **Habilitar Google Drive API:**
+   - En el proyecto, ve a "APIs & Services" → "Library"
+   - Busca "Google Drive API"
+   - Click en "Enable"
+
+3. **Crear Service Account:**
+   - Ve a "IAM & Admin" → "Service Accounts"
+   - Click en "Create Service Account"
+   - Nombre: "europa-fc-gps-reader"
+   - Rol: "Viewer" (o sin rol)
+   - Click en "Create and Continue" → "Done"
+
+4. **Generar clave JSON:**
+   - Click en el service account creado
+   - Tab "Keys" → "Add Key" → "Create new key"
+   - Tipo: JSON
+   - Se descarga automáticamente
+
+5. **Configurar permisos en Google Drive:**
+   - Abre Google Drive
+   - Ve a la carpeta con los archivos GPS
+   - Click derecho → "Share"
+   - Pega el email del service account (termina en `@...iam.gserviceaccount.com`)
+   - Permiso: "Viewer"
+   - Click en "Share"
+
+6. **Copiar credenciales a secrets.toml:**
+   - Abre el archivo JSON descargado
+   - Copia cada campo a `secrets.toml` bajo `[google_service_account]`
+   - **IMPORTANTE:** La `private_key` debe mantener los `\n`
+
+---
+
+## 📊 Uso de la Aplicación
+
+### **1. Iniciar Sesión**
+- Abre la aplicación
+- Ingresa usuario y contraseña
+- Click en "Iniciar Sesión"
+
+### **2. Cargar Datos desde Google Drive**
+- En el sidebar, click en "🔄 Cargar desde Drive"
+- Selecciona la carpeta que contiene los CSV
+- La app cargará automáticamente todos los archivos
+
+### **3. Configurar Filtros**
+- **Rango de fechas:** Desde/hasta en el sidebar
+- **Modo de análisis:** Partido específico, últimos N partidos, o rango personalizado
+
+### **4. Navegar por las Páginas**
+
+#### **🏠 Home - Referencias**
+- Estadísticas normalizadas a 94 minutos
+- Solo jugadores con >60 minutos
+- Base de comparación para análisis
+- 3 tabs: Tabla completa, por métrica, exportar
+
+#### **📊 Equipo**
+- Selector de partido único controla todo
+- Player cards con coloreado por referencia
+- 4 tabs analíticos: Distribución, evolución, matriz, datos
+
+#### **👤 Individual**
+- Evolución individual con líneas acumuladas
+- Comparativa entre jugadores
+- Exportación a PDF de informes personalizados
+
+#### **📈 Estatus Equipo**
+- Carga de entrenamientos
+- Análisis de estado físico general
+
+---
+
+## 🛠️ Tecnologías
+
+- **Python 3.12**
+- **Streamlit** - Framework web
+- **Pandas** - Manipulación de datos
+- **Plotly** - Visualizaciones interactivas
+- **Google Drive API** - Integración con Drive
+- **ReportLab** - Generación de PDFs
+- **Pillow** - Procesamiento de imágenes
+
+---
+
+## 📝 Notas Técnicas
+
+### **Normalización a 94 minutos**
+- Solo para calcular referencias
+- Filtro: jugadores con >60 minutos
+- Fórmula: `valor_94min = valor_original × (94 / tiempo_jugado)`
+
+### **Métricas Acumulativas (se normalizan)**
+- `total_distance`, `hsr`, `distance_vrange6`
+- `sprints`, `num_acc_expl`, `num_dec_expl`, `hmld`
+
+### **Métricas Relativas (NO se normalizan)**
+- `minute_distance` - Ya es por minuto
+- `max_speed` - Es un valor máximo
+- `hsr_rel`, `hmld_relative` - Ya son relativos
+
+### **Estructura de datos GPS**
+Los CSV deben contener:
+- `player`: Nombre del jugador
+- `date`: Fecha del partido
+- `time`: Tiempo jugado (MM:SS o decimal)
+- `task`: Tipo de sesión (debe incluir "Total")
+- Métricas físicas (ver `config.py`)
+
+---
+
+## 🔧 Configuración Avanzada
+
+### **Añadir nuevas métricas**
 
 Edita `config.py`:
-
 ```python
 METRICAS_DICT = {
-    'Mi Nueva Métrica': 'columna_csv',
+    'Mi Nueva Métrica': 'columna_en_csv',
+    # ...
+}
+
+METRICAS_ACUMULATIVAS = [
+    'columna_en_csv',  # Si es acumulativa
+    # ...
+]
+```
+
+### **Cambiar minutos mínimos para referencias**
+
+En `config.py`:
+```python
+MINUTOS_MINIMOS = 60  # Cambiar aquí
+```
+
+### **Personalizar colores**
+
+En `config.py`:
+```python
+COLORES = {
+    'primario': '#1f77b4',
+    'secundario': '#ff7f0e',
     # ...
 }
 ```
 
 ---
 
-## 📦 Módulos
+## 🛡️ Seguridad
 
-### **utils/data_loader.py**
-- `cargar_datos_csv()`: Carga CSV de la carpeta
-- `validar_columnas()`: Valida estructura
-- `obtener_info_dataset()`: Información del dataset
+- ✅ Autenticación por contraseña
+- ✅ Secrets NO incluidos en el repositorio
+- ✅ Service Account con permisos mínimos
+- ✅ Archivos sensibles en `.gitignore`
 
-### **utils/data_processor.py**
-- `procesar_datos()`: Procesa y limpia datos
-- `convertir_tiempo_a_minutos()`: Convierte MM:SS a decimal
-- `filtrar_por_fechas()`: Filtra por rango
-- `obtener_partidos_disponibles()`: Lista partidos
-
-### **utils/calculations.py**
-- `calcular_referencias_normalizadas()`: Normalización a 94 min
-- `calcular_estadisticas_partido()`: Stats de partido
-- `calcular_z_score()`: Cálculo de z-scores
-- `clasificar_rendimiento()`: Clasificación de rendimiento
+**NUNCA subas a GitHub:**
+- `.streamlit/secrets.toml`
+- `service_account.json`
+- Archivos CSV con datos personales
 
 ---
 
-## 🌐 Desplegar en Streamlit Cloud
+## 🐛 Troubleshooting
 
-### **1. Subir a GitHub:**
+### **Error: "No se encontraron datos"**
+- Verifica que la carpeta de Google Drive tenga CSV
+- Confirma que compartiste la carpeta con el service account
+- Revisa que los CSV tengan la columna `task='Total'`
 
+### **Error: "Authentication failed"**
+- Verifica las credenciales en `secrets.toml`
+- Asegúrate de que la `private_key` tenga los `\n` correctos
+- Confirma que Google Drive API está habilitada
+
+### **Error: "Module not found"**
 ```bash
-# Inicializar repositorio
-git init
-
-# Añadir archivos (sin CSV grandes)
-git add .
-
-# Commit
-git commit -m "Initial commit - Europa FC GPS App"
-
-# Conectar con GitHub
-git remote add origin https://github.com/tu-usuario/europa-gps.git
-git push -u origin main
-```
-
-### **2. Configurar Streamlit Cloud:**
-
-1. Ve a https://share.streamlit.io/
-2. Conecta tu repositorio de GitHub
-3. Selecciona:
-   - Branch: `main`
-   - Main file: `app.py`
-4. Click en "Deploy"
-
-**Nota:** Para deployment en la nube, los CSV deben estar en el repo o usar una base de datos externa.
-
----
-
-## 🛠️ Troubleshooting
-
-### **Error: "No se encontraron archivos CSV"**
-- Verifica que los CSV están en `data/`
-- Verifica que empiezan con `total_report_`
-- Verifica permisos de lectura
-
-### **Error al importar módulos**
-```bash
-# Reinstalar dependencias
 pip install -r requirements.txt --force-reinstall
 ```
 
-### **Streamlit no se abre**
-```bash
-# Verificar puerto
-streamlit run app.py --server.port 8502
-```
+### **Sidebar no se oculta automáticamente**
+- Verifica `initial_sidebar_state="collapsed"` en cada página
+- Revisa que `render_sidebar()` se llame sin parámetros
 
 ---
 
-## 📝 Notas Técnicas
+## 📈 Roadmap
 
-### **Normalización a 94 minutos:**
-- Solo para calcular referencias
-- Solo jugadores >60 minutos
-- Fórmula: `valor_94min = valor_original × (94 / tiempo_jugado)`
-
-### **Métricas acumulativas normalizadas:**
-- total_distance, hsr, distance_vrange6
-- sprints, num_acc_expl, num_dec_expl, hmld
-
-### **Métricas NO normalizadas:**
-- minute_distance (ya es por minuto)
-- max_speed (es un pico)
-- hsr_rel, hmld_relative (ya son relativos)
+- [ ] Integración con más proveedores GPS (Catapult, STATSports)
+- [ ] Dashboard de lesiones
+- [ ] Predicción de rendimiento con ML
+- [ ] Alertas automáticas de sobrecarga
+- [ ] API REST para integraciones
 
 ---
 
-## 🔄 Actualizar Datos
+## 👥 Créditos
 
-Para añadir nuevos partidos:
+**Desarrollado por:**
+- **Montxinho** - Community Manager UDDEA & Analista MCODE Sport Analytics
 
-```bash
-# Copiar nuevos CSV a data/
-cp nuevo_partido.csv data/
-
-# Recargar la app (automático)
-# O hacer clic en "🔄 Cargar/Recargar Datos"
-```
+**Para:**
+- **Europa FC** - Análisis GPS y Rendimiento Físico
 
 ---
 
-## 📧 Soporte
+## 📄 Licencia
 
-Para dudas técnicas:
-- Revisar este README
-- Verificar que los CSV tienen el formato correcto
-- Comprobar que `task='Total'` existe en los datos
+Privado - Europa FC  
+Todos los derechos reservados © 2025
 
 ---
 
-**Desarrollado para Europa FC** ⚽📊  
-**Versión 1.0** - Noviembre 2025
-=======
-# europa-fc-gps-dashboard
-📊 Dashboard GPS para Europa FC
->>>>>>> 5d0e68725f35945849d41a6e9c32fdc3b0533875
+## 📧 Contacto
+
+Para soporte técnico o consultas:
+- UDDEA: [contacto]
+- MCODE Sport Analytics: [contacto]
+
+---
+
+**Europa FC GPS Analytics v2.5.0** ⚽📊  
+*Última actualización: Febrero 2026*
