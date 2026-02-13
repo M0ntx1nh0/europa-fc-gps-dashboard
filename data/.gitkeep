@@ -1,8 +1,0 @@
-# Esta carpeta debe contener los archivos CSV de GPS
-# Archivos en formato: total_report_*.csv
-
-# Para añadir archivos:
-# cp /ruta/a/tus/csv/*.csv .
-
-# O crear enlace simbólico:
-# ln -s /ruta/a/tus/csv/* .
