@@ -18,11 +18,12 @@ FOLDER_IDS = {
     'fotos_jugadores': '1IZxw0TkG8d82UjteI5L5cRe78i-QFiey',
     'plantilla': '1YEmQ57mtxXSg-6TEDiS1BrSQNyjMm9Kj',
     'referencias_94min': '1oG5gTFjFgSc-CNvS0rpzY2UaG8KNeQJ3',
-    'usuarios': '1Rc3BIqAxedY-ybXDPwrePRFPTEUvlvKk'  # ← AÑADIR ESTA LÍNEA
+    'usuarios': '1Rc3BIqAxedY-ybXDPwrePRFPTEUvlvKk',
+    'escudo': '1ubalIbybtGqX8ZihQSur6puMHVRKkMDo'
 }
 
 
-def autenticar_google_drive():
+def autenticar_google_drive(mostrar_mensajes=True):
     """
     Autentica con Google Drive usando Service Account
     
@@ -49,7 +50,8 @@ def autenticar_google_drive():
             local_path = Path(__file__).parent.parent / 'service_account.json'
             
             if not local_path.exists():
-                st.error(f"❌ No se encuentra service_account.json en {local_path}")
+                if mostrar_mensajes:
+                    st.error(f"❌ No se encuentra service_account.json en {local_path}")
                 return None
             
             service_account_path = str(local_path)
@@ -69,7 +71,8 @@ def autenticar_google_drive():
         # Crear drive
         drive = GoogleDrive(gauth)
         
-        st.success("✅ Conectado a Google Drive")
+        if mostrar_mensajes:
+            st.success("✅ Conectado a Google Drive")
         
         # Limpiar archivo temporal si se creó
         if service_account_path and service_account_path.endswith('.json') and 'tmp' in service_account_path:
@@ -81,12 +84,13 @@ def autenticar_google_drive():
         return drive
         
     except Exception as e:
-        st.error(f"❌ Error autenticando con Google Drive: {str(e)}")
-        st.exception(e)
+        if mostrar_mensajes:
+            st.error(f"❌ Error autenticando con Google Drive: {str(e)}")
+            st.exception(e)
         return None
 
 
-def listar_archivos_carpeta(drive, folder_id, patron='*.csv'):
+def listar_archivos_carpeta(drive, folder_id, patron='*.csv', mostrar_mensajes=True):
     """
     Lista archivos de una carpeta de Drive
     
@@ -111,7 +115,8 @@ def listar_archivos_carpeta(drive, folder_id, patron='*.csv'):
         return file_list
         
     except Exception as e:
-        st.error(f"❌ Error listando archivos: {str(e)}")
+        if mostrar_mensajes:
+            st.error(f"❌ Error listando archivos: {str(e)}")
         return []
 
 
@@ -242,6 +247,57 @@ def obtener_ruta_foto_jugador_drive(jugador):
     # Por ahora, devolver ruta local por defecto
     from utils.visualizations import obtener_foto_jugador
     return obtener_foto_jugador(jugador)
+
+
+@st.cache_data(ttl=3600)
+def obtener_escudo_path():
+    """
+    Obtiene ruta del escudo priorizando Drive.
+    Si falla, devuelve el escudo local del repositorio.
+    """
+    local_path = Path(__file__).parent.parent / "assets" / "Escudo" / "Escudo.png"
+    folder_id = FOLDER_IDS.get("escudo")
+
+    if not folder_id:
+        return str(local_path)
+
+    try:
+        drive = autenticar_google_drive(mostrar_mensajes=False)
+        if drive is None:
+            return str(local_path)
+
+        archivos = listar_archivos_carpeta(drive, folder_id, patron='*', mostrar_mensajes=False)
+        if not archivos:
+            return str(local_path)
+
+        candidatos = sorted(
+            archivos,
+            key=lambda f: (
+                0 if "escudo" in f["title"].lower() else 1,
+                0 if f["title"].lower().endswith(".png") else 1,
+                f["title"].lower()
+            )
+        )
+
+        archivo = None
+        for f in candidatos:
+            title = f["title"].lower()
+            if title.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                archivo = f
+                break
+
+        if archivo is None:
+            return str(local_path)
+
+        cache_path = Path(__file__).parent.parent / "assets" / "Escudo" / "Escudo_drive_cache.png"
+        archivo.GetContentFile(str(cache_path))
+
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            return str(cache_path)
+
+        return str(local_path)
+    except Exception:
+        return str(local_path)
 
 
 def obtener_info_dataset(df):

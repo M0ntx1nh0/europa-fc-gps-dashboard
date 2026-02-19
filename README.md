@@ -22,7 +22,6 @@ Europa_APP/
 ├── requirements.txt                # Dependencias Python
 │
 ├── pages/                          # Páginas Streamlit
-│   ├── 1_🏠_Home.py               # Referencias normalizadas
 │   ├── 2_📊_Equipo.py             # Análisis de equipo
 │   ├── 3_👤_Individual.py         # Análisis individual
 │   └── 4_📈_estatus_equipo.py     # Estado del equipo
@@ -202,21 +201,14 @@ client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/tu-ser
 - Click en "Iniciar Sesión"
 
 ### **2. Cargar Datos desde Google Drive**
-- En el sidebar, click en "🔄 Cargar desde Drive"
-- Selecciona la carpeta que contiene los CSV
-- La app cargará automáticamente todos los archivos
+- La app intenta cargar automáticamente al iniciar sesión
+- Si necesitas refrescar, usa el botón de recarga manual en la pantalla principal
 
 ### **3. Configurar Filtros**
 - **Rango de fechas:** Desde/hasta en el sidebar
 - **Modo de análisis:** Partido específico, últimos N partidos, o rango personalizado
 
 ### **4. Navegar por las Páginas**
-
-#### **🏠 Home - Referencias**
-- Estadísticas normalizadas a 94 minutos
-- Solo jugadores con >60 minutos
-- Base de comparación para análisis
-- 3 tabs: Tabla completa, por métrica, exportar
 
 #### **📊 Equipo**
 - Selector de partido único controla todo

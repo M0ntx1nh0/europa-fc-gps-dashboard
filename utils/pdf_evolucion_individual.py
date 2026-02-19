@@ -7,6 +7,7 @@ from datetime import datetime
 import tempfile
 import os
 from pathlib import Path
+from utils.drive_loader import obtener_escudo_path
 
 class PDFEvolucionIndividual(FPDF):
     """PDF personalizado con header y footer"""
@@ -21,7 +22,7 @@ class PDFEvolucionIndividual(FPDF):
         """Header con escudo y fecha en todas las páginas excepto portada"""
         if self.page_no() > 1:
             # Escudo arriba a la derecha (AÚN MÁS ARRIBA)
-            escudo_path = escudo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "Escudo", "Escudo.png")
+            escudo_path = obtener_escudo_path()
             if os.path.exists(escudo_path):
                 self.image(escudo_path, x=175, y=6, w=20)  # ← y=6 (antes 8)
             
@@ -79,7 +80,7 @@ def generar_pdf_evolucion_individual(
     pdf.line(40, 20, 40, 277)  # Vertical desde arriba hasta abajo
     
     # Escudo arriba a la izquierda (a la izquierda de la línea)
-    escudo_path = escudo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "Escudo", "Escudo.png")
+    escudo_path = obtener_escudo_path()
     if os.path.exists(escudo_path):
         pdf.image(escudo_path, x=10, y=20, w=25)
     

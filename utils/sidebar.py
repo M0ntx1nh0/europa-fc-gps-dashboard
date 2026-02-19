@@ -4,6 +4,7 @@ Sidebar común para todas las páginas
 
 import streamlit as st
 import pandas as pd
+from utils.drive_loader import obtener_escudo_path
 
 
 def render_sidebar():
@@ -27,7 +28,7 @@ def render_sidebar():
     with st.sidebar:
         # Logo
         try:
-            st.image("assets/Escudo/Escudo.png", width=150)
+            st.image(obtener_escudo_path(), width=150)
         except:
             st.markdown("⚽ **Europa FC**")
         
@@ -59,11 +60,14 @@ def render_sidebar():
                     
                     st.caption(f"📅 {fecha_min.strftime('%d/%m/%Y')}")
                     st.caption(f"📅 {fecha_max.strftime('%d/%m/%Y')}")
+                    ultima_carga = st.session_state.get('ultima_carga_drive')
+                    if ultima_carga:
+                        st.caption(f"🔄 Actualizado: {ultima_carga}")
                 except:
                     st.caption("📅 Fechas no disponibles")
         else:
             st.warning("⚠️ Sin datos")
-            st.caption("Ve a Home")
+            st.caption("Ve a la página principal")
         
         st.markdown("---")
         st.caption("Europa FC v2.5")

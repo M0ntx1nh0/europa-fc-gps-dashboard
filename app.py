@@ -6,17 +6,70 @@ v2.5.0 - Sistema de autenticación y carga desde Google Drive
 
 import streamlit as st
 import pandas as pd
-from pathlib import Path
+import numpy as np
+from datetime import datetime
 
 # Importar configuración
-from config import PAGE_TITLE, PAGE_ICON, LAYOUT, DATA_DIR, METRICAS_DICT
+from config import PAGE_TITLE, PAGE_ICON, LAYOUT
 
 # Importar utilidades
-from utils import render_sidebar, cargar_datos_desde_drive
+from utils import render_sidebar, cargar_datos_desde_drive, convertir_tiempo_a_minutos
 from utils.auth import mostrar_login, mostrar_info_usuario
+from utils.drive_loader import obtener_escudo_path
 
 # Asegurar que pandas no convierte datetime a string
 pd.options.mode.copy_on_write = True
+
+
+def cargar_datos_en_sesion():
+    """
+    Carga datos desde Drive y actualiza session_state.
+
+    Returns:
+        bool: True si la carga fue exitosa.
+    """
+    df = cargar_datos_desde_drive(equipo='europa')
+
+    if df is None or len(df) == 0:
+        return False
+
+    # Normalizar columnas base para asegurar métricas derivadas.
+    if 'time' in df.columns:
+        if df['time'].dtype == 'object':
+            time_limpio = (
+                df['time']
+                .astype(str)
+                .str.replace("'", "", regex=False)
+                .str.strip()
+                .replace({'': pd.NA, 'nan': pd.NA, 'None': pd.NA})
+            )
+            df['time'] = time_limpio.apply(convertir_tiempo_a_minutos)
+        df['time'] = pd.to_numeric(df['time'], errors='coerce')
+
+    if 'hsr' in df.columns:
+        df['hsr'] = pd.to_numeric(df['hsr'], errors='coerce')
+
+    # Calcular HSR relativo si no viene en el dataset.
+    if 'hsr' in df.columns and 'time' in df.columns:
+        recalcular_hsr_rel = ('hsr_rel' not in df.columns)
+        if not recalcular_hsr_rel:
+            df['hsr_rel'] = pd.to_numeric(df['hsr_rel'], errors='coerce')
+            recalcular_hsr_rel = df['hsr_rel'].isna().all()
+
+        if recalcular_hsr_rel:
+            df['hsr_rel'] = np.where(df['time'] > 0, df['hsr'] / df['time'], np.nan)
+
+    # Asegurar consistencia de tipos antes de guardar en sesión
+    df['date'] = pd.to_datetime(df['date'])
+
+    st.session_state.df_procesado = df
+    st.session_state.datos_cargados = True
+    st.session_state.fecha_desde = pd.to_datetime(df['date'].min())
+    st.session_state.fecha_hasta = pd.to_datetime(df['date'].max())
+    st.session_state.partido_seleccionado = pd.to_datetime(df['date'].max())
+    st.session_state.ultima_carga_drive = datetime.now().strftime('%d/%m/%Y %H:%M')
+
+    return True
 
 
 # Configuración de la página
@@ -93,6 +146,8 @@ def main():
     # ==========================================
     if 'datos_cargados' not in st.session_state:
         st.session_state.datos_cargados = False
+    if 'carga_automatica_intentada' not in st.session_state:
+        st.session_state.carga_automatica_intentada = False
     
     # Header
     st.markdown('<h1 class="main-header">⚽ Europa FC - Análisis GPS</h1>', unsafe_allow_html=True)
@@ -110,35 +165,42 @@ def main():
         # ========================================
         
         st.subheader("📂 Carga de Datos")
+
+        # Auto-carga una vez por sesión tras autenticación.
+        if not st.session_state.get('carga_automatica_intentada', False):
+            st.info("⏳ Cargando datos automáticamente desde Google Drive...")
+            with st.spinner("Cargando datos desde Drive..."):
+                try:
+                    carga_ok = cargar_datos_en_sesion()
+                    st.session_state.carga_automatica_intentada = True
+
+                    if carga_ok:
+                        st.success("✅ Datos cargados automáticamente")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ No se pudo cargar automáticamente. Puedes intentarlo manualmente.")
+                except Exception as e:
+                    st.session_state.carga_automatica_intentada = True
+                    st.error(f"❌ Error en carga automática: {str(e)}")
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
             st.markdown("""
             **Instrucciones:**
-            1. Haz click en el botón "Cargar Datos desde Google Drive"
-            2. Los datos se cargarán automáticamente desde la carpeta configurada
+            1. La app intenta cargar automáticamente al iniciar sesión
+            2. Si falla o quieres refrescar, usa el botón de carga manual
             3. Una vez cargados, podrás navegar a las otras páginas
             """)
         
         with col2:
-            if st.button("📥 Cargar Datos desde Google Drive", type="primary", use_container_width=True):
+            if st.button("📥 Cargar/Actualizar datos desde Google Drive", type="primary", use_container_width=True):
                 with st.spinner("Cargando datos desde Drive..."):
                     try:
-                        # Cargar datos
-                        df = cargar_datos_desde_drive(equipo='europa')
-                        
-                        if df is not None and len(df) > 0:
-                            # CRÍTICO: Asegurar que date es datetime antes de guardar
-                            df['date'] = pd.to_datetime(df['date'])
+                        carga_ok = cargar_datos_en_sesion()
+                        st.session_state.carga_automatica_intentada = True
 
-                            # Guardar en session_state CON CONVERSIÓN A DATETIME
-                            st.session_state.df_procesado = df
-                            st.session_state.datos_cargados = True
-                            st.session_state.fecha_desde = pd.to_datetime(df['date'].min())
-                            st.session_state.fecha_hasta = pd.to_datetime(df['date'].max())
-                            st.session_state.partido_seleccionado = pd.to_datetime(df['date'].max())      
-                            
+                        if carga_ok:
                             st.success("✅ Datos cargados correctamente")
                             st.rerun()
                         else:
@@ -155,7 +217,7 @@ def main():
         with col2:
             # Logo del Europa FC
             try:
-                st.image("assets/Escudo/Escudo.png", width=400)
+                st.image(obtener_escudo_path(), width=400)
             except:
                 st.info("⚽ Europa FC")
             
@@ -167,13 +229,12 @@ def main():
             
             #### 🚀 Para comenzar:
             
-            1. **Haz click** en "Cargar Datos desde Google Drive" arriba
-            2. **Espera** a que los datos se carguen automáticamente
+            1. **Espera** la carga automática inicial desde Google Drive
+            2. Si hace falta, pulsa **Cargar/Actualizar datos** arriba
             3. **Navega** por las diferentes páginas del menú lateral
             
             #### 📊 Páginas disponibles:
             
-            - **🏠 Home:** Vista general y carga de datos
             - **📊 Equipo:** Player Cards y análisis del partido
             - **👤 Individual:** Evolución y análisis por jugador
             - **📊 Estatus del Equipo:** <span class="new-badge">NUEVO</span> Vista panorámica con gráficos avanzados
@@ -262,7 +323,6 @@ def main():
         #### 📊 **Páginas disponibles:**
         
         **Para análisis rápido:**
-        - **🏠 Home:** Estadísticas de referencia normalizadas a 94 min
         - **📊 Equipo:** Player Cards con rendimiento individual del partido
         
         **Para análisis detallado:**
