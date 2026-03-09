@@ -54,7 +54,45 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
         .sort_values("fecha")["fecha_label"]
         .tolist()
     )
-    nombres = df_plot["nombre"].drop_duplicates().tolist()
+    def _extraer_base_y_tramo(nombre_serie):
+        partes = str(nombre_serie).rsplit(" - ", 1)
+        if len(partes) == 2 and partes[1] in ["1ª Parte", "2ª Parte"]:
+            return partes[0], partes[1]
+        return str(nombre_serie), None
+
+    nombres_unicos = df_plot["nombre"].drop_duplicates().tolist()
+    # Orden descendente por valor medio. Si hay tramos 1ª/2ª separados, se emparejan.
+    tiene_tramos_separados = any(
+        str(n).endswith(" - 1ª Parte") or str(n).endswith(" - 2ª Parte")
+        for n in nombres_unicos
+    )
+    if tiene_tramos_separados:
+        df_orden = df_plot.copy()
+        df_orden[["base", "tramo"]] = df_orden["nombre"].apply(lambda n: pd.Series(_extraer_base_y_tramo(n)))
+        orden_base = (
+            df_orden.groupby("base")["valor"]
+            .mean()
+            .sort_values(ascending=False)
+            .index
+            .tolist()
+        )
+        idx_base = {b: i for i, b in enumerate(orden_base)}
+        idx_tramo = {"1ª Parte": 0, "2ª Parte": 1, None: 2}
+        nombres = sorted(
+            nombres_unicos,
+            key=lambda n: (
+                idx_base.get(_extraer_base_y_tramo(n)[0], 999),
+                idx_tramo.get(_extraer_base_y_tramo(n)[1], 2),
+            ),
+        )
+    else:
+        nombres = (
+            df_plot.groupby("nombre")["valor"]
+            .mean()
+            .sort_values(ascending=False)
+            .index
+            .tolist()
+        )
 
     fig, ax = plt.subplots(figsize=(12, 5.8))
     x = np.arange(len(fechas))

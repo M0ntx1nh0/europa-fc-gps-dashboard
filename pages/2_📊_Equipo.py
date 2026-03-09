@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
+import re
+import unicodedata
 import sys
 from pathlib import Path
 
@@ -98,9 +100,13 @@ def main():
         metrica_col = METRICAS_DICT[metrica_nombre]
     
     with col3:
+        opciones_estadistico = ['Media', 'Máximo', 'P70', 'P95']
+        if nivel_analisis in ['Equipo', 'Por posiciones']:
+            opciones_estadistico = ['Media', 'Máximo', 'P70', 'P95', 'Sumatorio']
+
         estadistico = st.selectbox(
             "📊 Estadístico:",
-            options=['Media', 'Máximo', 'P70', 'P95'],
+            options=opciones_estadistico,
             key='estadistico_analisis',
             help="Media: Promedio\nMáximo: Valor más alto\nP70/P95: Percentiles"
         )
@@ -111,6 +117,33 @@ def main():
         key="mostrar_tendencia_equipo",
         help="Añade una línea discontinua para facilitar la lectura (sube, baja o estable)."
     )
+
+    filtro_parte = st.selectbox(
+        "⏱️ Tramo de partido:",
+        options=[
+            "Total",
+            "1ª Parte",
+            "2ª Parte",
+            "1ª + 2ª (Conjunto)",
+            "1ª + 2ª (Separadas)",
+        ],
+        key="filtro_parte_analisis",
+        help="Total, cada parte por separado o ambas mitades juntas."
+    )
+
+    with st.expander("ℹ️ Ver lógica del filtro de minutos por tramo"):
+        st.markdown(
+            """
+            | Tramo seleccionado | Regla de minutos en `Equipo` / `Por posiciones` | Motivo |
+            |---|---|---|
+            | `Total` | Solo jugadores con `time > 60` | Mantener comparativas con participación suficiente. |
+            | `1ª Parte` | Sin filtro de `>60` | En una mitad, casi nadie supera 60'. |
+            | `2ª Parte` | Sin filtro de `>60` | En una mitad, casi nadie supera 60'. |
+            | `1ª + 2ª (Conjunto)` | Sin filtro de `>60` | Evitar perder datos al analizar por mitades. |
+            | `1ª + 2ª (Separadas)` | Sin filtro de `>60` | Mostrar ambas partes aunque los minutos sean parciales. |
+            """
+        )
+        st.caption("En `Individual` no se aplica el filtro `time > 60` en ningún tramo.")
     
     st.markdown("---")
     
@@ -123,6 +156,79 @@ def main():
     df_limpio = df_limpio[df_limpio['player'].notna()]
     df_limpio = df_limpio[df_limpio['player'].astype(str).str.strip() != '']
     df_limpio = df_limpio[df_limpio['player'].astype(str) != '0']
+    df_limpio_base = df_limpio.copy()
+
+    # Clasificar tramo por task/session para habilitar filtro de 1ª/2ª parte.
+    def normalizar_texto(valor):
+        txt = str(valor or "").strip().lower()
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+        txt = re.sub(r"[^a-z0-9]+", " ", txt)
+        return txt.strip()
+
+    def clasificar_tramo(row):
+        task_txt = normalizar_texto(row.get('task', ''))
+        session_txt = normalizar_texto(row.get('session', ''))
+        txt = f"{task_txt} {session_txt}"
+        txt_compacto = txt.replace(" ", "")
+        if 'total' in txt:
+            return 'Total'
+        if any(token in txt_compacto for token in ["total", "complet", "completo", "fullmatch"]):
+            return 'Total'
+
+        tiene_token_parte = re.search(
+            r"\b(parte|part|periodo|period|half|mitad|temps|tiempo)\b", txt
+        ) is not None
+        es_primera = re.search(
+            r"\b(1|1a|1r|p1|periodo 1|period 1|primera|primer|first)\b", txt
+        ) is not None
+        es_segunda = re.search(
+            r"\b(2|2a|2n|p2|periodo 2|period 2|segunda|segundo|second)\b", txt
+        ) is not None
+        primera_compacta = any(
+            token in txt_compacto
+            for token in [
+                "1apart", "part1", "parte1", "periodo1", "period1", "half1", "mitad1",
+                "primertemps", "primerapart", "firsthalf", "p1"
+            ]
+        )
+        segunda_compacta = any(
+            token in txt_compacto
+            for token in [
+                "2apart", "part2", "parte2", "periodo2", "period2", "half2", "mitad2",
+                "segontemps", "segundapart", "secondhalf", "p2"
+            ]
+        )
+
+        # Ejemplos: "1A PART", "1ª PARTE", "Periodo 1", "P1", "First half"
+        if (es_primera and tiene_token_parte) or primera_compacta:
+            return '1ª Parte'
+        # Ejemplos: "2A PART", "2ª PARTE", "Periodo 2", "P2", "Second half"
+        if (es_segunda and tiene_token_parte) or segunda_compacta:
+            return '2ª Parte'
+        return 'Total'
+
+    df_limpio['tramo_partido'] = df_limpio.apply(clasificar_tramo, axis=1)
+
+    # Aplicar filtro de tramo.
+    if filtro_parte == "Total":
+        df_limpio = df_limpio[df_limpio['tramo_partido'] == 'Total']
+        if len(df_limpio) == 0:
+            # Fallback: si los datos no traen task='Total', usar todo el dataset filtrado.
+            df_limpio = df_limpio_base.copy()
+    elif filtro_parte == "1ª Parte":
+        df_limpio = df_limpio[df_limpio['tramo_partido'] == '1ª Parte']
+    elif filtro_parte == "2ª Parte":
+        df_limpio = df_limpio[df_limpio['tramo_partido'] == '2ª Parte']
+    elif filtro_parte == "1ª + 2ª (Conjunto)":
+        df_limpio = df_limpio[df_limpio['tramo_partido'].isin(['1ª Parte', '2ª Parte'])].copy()
+        df_limpio['tramo_partido'] = '1ª + 2ª'
+    else:  # "1ª + 2ª (Separadas)"
+        df_limpio = df_limpio[df_limpio['tramo_partido'].isin(['1ª Parte', '2ª Parte'])]
+
+    if len(df_limpio) == 0:
+        st.warning("⚠️ No hay datos para el tramo de partido seleccionado.")
+        st.stop()
     posiciones_seleccionadas = []
     jugadores_seleccionados = []
     
@@ -192,10 +298,19 @@ def main():
             return valores.quantile(0.70)
         elif tipo == 'P95':
             return valores.quantile(0.95)
+        elif tipo == 'Sumatorio':
+            return valores.sum()
         return valores.mean()
     
     # Obtener fechas únicas ordenadas
     fechas_disponibles = sorted(df_limpio['date'].unique())
+
+    def aplicar_filtro_minutos(df_in):
+        # Regla >60' solo para vista TOTAL en Equipo/Posiciones.
+        # En mitades, aplicar >60' vacía el resultado (minutos por tramo suelen ser <60).
+        if nivel_analisis in ['Equipo', 'Por posiciones'] and filtro_parte == "Total":
+            return df_in[df_in['time'] > 60]
+        return df_in
 
     def construir_datos_grafico(metrica_objetivo):
         datos = []
@@ -203,19 +318,29 @@ def main():
         if nivel_analisis == 'Equipo':
             # Una barra por partido (estadístico del equipo completo)
             for fecha in fechas_disponibles:
-                df_fecha = df_limpio[df_limpio['date'] == fecha]
+                df_fecha_base = df_limpio[df_limpio['date'] == fecha]
+                subgrupos = [("general", df_fecha_base)]
+                if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_fecha_base.columns:
+                    subgrupos = list(df_fecha_base.groupby('tramo_partido'))
 
-                if len(df_fecha) > 0:
+                for tramo_key, df_fecha in subgrupos:
+                    df_fecha = aplicar_filtro_minutos(df_fecha)
+                    if len(df_fecha) == 0:
+                        continue
+
                     valor = calcular_estadistico(df_fecha[metrica_objetivo], estadistico)
                     minutaje_promedio = df_fecha['time'].mean()
+                    nombre_serie = 'Equipo'
+                    if filtro_parte == "1ª + 2ª (Separadas)":
+                        nombre_serie = f"Equipo - {tramo_key}"
 
                     datos.append({
                         'fecha': fecha,
-                        'nombre': 'Equipo',
+                        'nombre': nombre_serie,
                         'valor': valor,
                         'minutaje': minutaje_promedio,
                         'color': COLORES['primario'],
-                        'grupo': 'Equipo'
+                        'grupo': nombre_serie
                     })
 
         elif nivel_analisis == 'Por posiciones':
@@ -233,43 +358,61 @@ def main():
 
                 for idx, jugador in enumerate(jugadores_posicion):
                     for fecha in fechas_disponibles:
-                        df_jug_fecha = df_limpio[
+                        df_jug_fecha_base = df_limpio[
                             (df_limpio['player'] == jugador) &
                             (df_limpio['date'] == fecha)
                         ]
+                        subgrupos = [("general", df_jug_fecha_base)]
+                        if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_jug_fecha_base.columns:
+                            subgrupos = list(df_jug_fecha_base.groupby('tramo_partido'))
 
-                        if len(df_jug_fecha) > 0:
+                        for tramo_key, df_jug_fecha in subgrupos:
+                            df_jug_fecha = aplicar_filtro_minutos(df_jug_fecha)
+                            if len(df_jug_fecha) == 0:
+                                continue
                             valor = calcular_estadistico(df_jug_fecha[metrica_objetivo], estadistico)
                             minutaje = df_jug_fecha['time'].mean()
+                            nombre_serie = jugador
+                            if filtro_parte == "1ª + 2ª (Separadas)":
+                                nombre_serie = f"{jugador} - {tramo_key}"
 
                             datos.append({
                                 'fecha': fecha,
-                                'nombre': jugador,
+                                'nombre': nombre_serie,
                                 'valor': valor,
                                 'minutaje': minutaje,
                                 'color': colores_individuales[idx % len(colores_individuales)],
-                                'grupo': jugador
+                                'grupo': nombre_serie
                             })
             else:
                 # MÚLTIPLES POSICIONES: barras por posición
                 for posicion in posiciones_seleccionadas:
                     for fecha in fechas_disponibles:
-                        df_pos_fecha = df_limpio[
+                        df_pos_fecha_base = df_limpio[
                             (df_limpio['posicion'] == posicion) &
                             (df_limpio['date'] == fecha)
                         ]
+                        subgrupos = [("general", df_pos_fecha_base)]
+                        if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_pos_fecha_base.columns:
+                            subgrupos = list(df_pos_fecha_base.groupby('tramo_partido'))
 
-                        if len(df_pos_fecha) > 0:
+                        for tramo_key, df_pos_fecha in subgrupos:
+                            df_pos_fecha = aplicar_filtro_minutos(df_pos_fecha)
+                            if len(df_pos_fecha) == 0:
+                                continue
                             valor = calcular_estadistico(df_pos_fecha[metrica_objetivo], estadistico)
                             minutaje_promedio = df_pos_fecha['time'].mean()
+                            nombre_serie = posicion
+                            if filtro_parte == "1ª + 2ª (Separadas)":
+                                nombre_serie = f"{posicion} - {tramo_key}"
 
                             datos.append({
                                 'fecha': fecha,
-                                'nombre': posicion,
+                                'nombre': nombre_serie,
                                 'valor': valor,
                                 'minutaje': minutaje_promedio,
                                 'color': colores_posicion[posicion],
-                                'grupo': posicion
+                                'grupo': nombre_serie
                             })
 
         else:  # Individual
@@ -277,22 +420,30 @@ def main():
 
             for idx, jugador in enumerate(jugadores_seleccionados):
                 for fecha in fechas_disponibles:
-                    df_jug_fecha = df_limpio[
+                    df_jug_fecha_base = df_limpio[
                         (df_limpio['player'] == jugador) &
                         (df_limpio['date'] == fecha)
                     ]
+                    subgrupos = [("general", df_jug_fecha_base)]
+                    if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_jug_fecha_base.columns:
+                        subgrupos = list(df_jug_fecha_base.groupby('tramo_partido'))
 
-                    if len(df_jug_fecha) > 0:
+                    for tramo_key, df_jug_fecha in subgrupos:
+                        if len(df_jug_fecha) == 0:
+                            continue
                         valor = calcular_estadistico(df_jug_fecha[metrica_objetivo], estadistico)
                         minutaje = df_jug_fecha['time'].mean()
+                        nombre_serie = jugador
+                        if filtro_parte == "1ª + 2ª (Separadas)":
+                            nombre_serie = f"{jugador} - {tramo_key}"
 
                         datos.append({
                             'fecha': fecha,
-                            'nombre': jugador,
+                            'nombre': nombre_serie,
                             'valor': valor,
                             'minutaje': minutaje,
                             'color': colores_individuales[idx % len(colores_individuales)],
-                            'grupo': jugador
+                            'grupo': nombre_serie
                         })
 
         return datos
@@ -325,7 +476,46 @@ def main():
         df_local = df_grafico_plot.copy()
         df_local["trend"] = np.nan
 
-        for nombre in df_local['nombre'].unique():
+        def extraer_base_y_tramo(nombre_serie):
+            partes = str(nombre_serie).rsplit(" - ", 1)
+            if len(partes) == 2 and partes[1] in ["1ª Parte", "2ª Parte"]:
+                return partes[0], partes[1]
+            return str(nombre_serie), None
+
+        # Orden descendente por valor y, en modo separadas, emparejar 1ª/2ª por entidad.
+        if filtro_parte == "1ª + 2ª (Separadas)":
+            df_orden = df_local.copy()
+            df_orden[["base", "tramo"]] = df_orden["nombre"].apply(
+                lambda n: pd.Series(extraer_base_y_tramo(n))
+            )
+            orden_base = (
+                df_orden.groupby("base")["valor"]
+                .mean()
+                .sort_values(ascending=False)
+                .index
+                .tolist()
+            )
+            idx_base = {b: i for i, b in enumerate(orden_base)}
+            idx_tramo = {"1ª Parte": 0, "2ª Parte": 1, None: 2}
+
+            series_unicas = sorted(
+                df_local["nombre"].unique().tolist(),
+                key=lambda n: (
+                    idx_base.get(extraer_base_y_tramo(n)[0], 999),
+                    idx_tramo.get(extraer_base_y_tramo(n)[1], 2),
+                ),
+            )
+            orden_series = series_unicas
+        else:
+            orden_series = (
+                df_local.groupby('nombre')['valor']
+                .mean()
+                .sort_values(ascending=False)
+                .index
+                .tolist()
+            )
+
+        for nombre in orden_series:
             df_grupo = df_local[df_local['nombre'] == nombre].sort_values('fecha').copy()
 
             if mostrar_tendencia and len(df_grupo) >= 2:
@@ -543,20 +733,21 @@ def main():
     def construir_texto_filtro():
         if modo_partido == 'Partido Específico':
             fecha = info_filtro.get('partido_seleccionado')
-            return f"Partido específico: {fecha.strftime('%d/%m/%Y')}" if fecha is not None else "Partido específico"
+            base = f"Partido específico: {fecha.strftime('%d/%m/%Y')}" if fecha is not None else "Partido específico"
+            return f"{base} | Tramo: {filtro_parte}"
         if modo_partido == 'Últimos N partidos':
             n = info_filtro.get('n_partidos', 0)
             ini = info_filtro.get('fecha_inicio')
             fin = info_filtro.get('fecha_fin')
             if ini is not None and fin is not None:
-                return f"Últimos {n} partidos ({ini.strftime('%d/%m/%Y')} - {fin.strftime('%d/%m/%Y')})"
-            return f"Últimos {n} partidos"
+                return f"Últimos {n} partidos ({ini.strftime('%d/%m/%Y')} - {fin.strftime('%d/%m/%Y')}) | Tramo: {filtro_parte}"
+            return f"Últimos {n} partidos | Tramo: {filtro_parte}"
 
         ini = info_filtro.get('fecha_inicio')
         fin = info_filtro.get('fecha_fin')
         if ini is not None and fin is not None:
-            return f"Rango de fechas: {ini.strftime('%d/%m/%Y')} - {fin.strftime('%d/%m/%Y')}"
-        return "Rango de fechas personalizado"
+            return f"Rango de fechas: {ini.strftime('%d/%m/%Y')} - {fin.strftime('%d/%m/%Y')} | Tramo: {filtro_parte}"
+        return f"Rango de fechas personalizado | Tramo: {filtro_parte}"
 
     def construir_texto_alcance():
         if nivel_analisis == 'Equipo':
