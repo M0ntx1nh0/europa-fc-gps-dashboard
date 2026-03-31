@@ -48,7 +48,7 @@ MINUTOS_NORMALIZACION = 94
 MINUTOS_MINIMOS = 60  # Mínimo de minutos para incluir en referencias
 
 # Configuración de Streamlit
-PAGE_TITLE = "Europa FC - Análisis GPS"
+PAGE_TITLE = "CE Europa - Análisis GPS"
 PAGE_ICON = "⚽"
 LAYOUT = "wide"
 

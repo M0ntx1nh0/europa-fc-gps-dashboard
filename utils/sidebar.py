@@ -30,7 +30,7 @@ def render_sidebar():
         try:
             st.image(obtener_escudo_path(), width=150)
         except:
-            st.markdown("⚽ **Europa FC**")
+            st.markdown("⚽ **CE Europa**")
         
         st.markdown("---")
         st.markdown("### 📊 GPS Analytics")
@@ -70,4 +70,4 @@ def render_sidebar():
             st.caption("Ve a la página principal")
         
         st.markdown("---")
-        st.caption("Europa FC v2.5")
+        st.caption("CE Europa v2.5")

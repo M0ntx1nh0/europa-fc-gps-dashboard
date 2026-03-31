@@ -1,5 +1,5 @@
 """
-Módulo de autenticación para Europa FC GPS
+Módulo de autenticación para CE Europa GPS
 Gestión de usuarios desde Google Drive
 """
 
@@ -230,7 +230,7 @@ def mostrar_login():
         except:
             st.markdown("⚽")
         
-        st.markdown('<div class="login-header">Europa FC GPS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-header">CE Europa GPS</div>', unsafe_allow_html=True)
         st.markdown("### 🔐 Acceso Restringido")
         
         # Formulario de login
@@ -264,7 +264,7 @@ def mostrar_login():
         st.markdown("""
         <div style='text-align: center; color: #666; font-size: 0.8rem;'>
             <p>Sistema de Análisis GPS</p>
-            <p>Europa FC - Usuarios gestionados desde Drive</p>
+            <p>CE Europa - Usuarios gestionados desde Drive</p>
         </div>
         """, unsafe_allow_html=True)
     

@@ -1,5 +1,5 @@
 """
-Europa FC - Aplicación de Análisis GPS
+CE Europa - Aplicación de Análisis GPS
 Aplicación principal (Landing page)
 v2.5.0 - Sistema de autenticación y carga desde Google Drive
 """
@@ -150,7 +150,7 @@ def main():
         st.session_state.carga_automatica_intentada = False
     
     # Header
-    st.markdown('<h1 class="main-header">⚽ Europa FC - Análisis GPS</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">⚽ CE Europa - Análisis GPS</h1>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Sistema de análisis de datos físicos y rendimiento</p>', unsafe_allow_html=True)
     
     st.markdown("---")
@@ -215,16 +215,16 @@ def main():
         col1, col2, col3 = st.columns([1, 2, 1])
         
         with col2:
-            # Logo del Europa FC
+            # Logo del CE Europa
             try:
                 st.image(obtener_escudo_path(), width=400)
             except:
-                st.info("⚽ Europa FC")
+                st.info("⚽ CE Europa")
             
             st.markdown("""
             ### 👋 Bienvenido al Sistema de Análisis GPS
             
-            Esta aplicación te permite analizar datos físicos de los partidos del Europa FC
+            Esta aplicación te permite analizar datos físicos de los partidos del CE Europa
             con herramientas avanzadas de visualización y análisis estadístico.
             
             #### 🚀 Para comenzar:
@@ -374,7 +374,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 2rem;'>
-        <p><strong>Europa FC - Sistema de Análisis GPS</strong></p>
+        <p><strong>CE Europa - Sistema de Análisis GPS</strong></p>
         <p>Desarrollado con ❤️ usando Streamlit</p>
         <p style='font-size: 0.8rem;'>v2.5.0 - Febrero 2025</p>
     </div>

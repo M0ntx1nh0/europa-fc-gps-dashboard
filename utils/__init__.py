@@ -1,5 +1,5 @@
 """
-Módulo de utilidades para la aplicación Europa FC GPS
+Módulo de utilidades para la aplicación CE Europa GPS
 """
 
 from .data_loader import validar_columnas
