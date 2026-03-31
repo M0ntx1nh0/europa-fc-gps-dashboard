@@ -131,20 +131,6 @@ def main():
         help="Total, cada parte por separado o ambas mitades juntas."
     )
 
-    with st.expander("ℹ️ Ver lógica del filtro de minutos por tramo"):
-        st.markdown(
-            """
-            | Tramo seleccionado | Regla de minutos en `Equipo` / `Por posiciones` | Motivo |
-            |---|---|---|
-            | `Total` | Solo jugadores con `time > 60` | Mantener comparativas con participación suficiente. |
-            | `1ª Parte` | Sin filtro de `>60` | En una mitad, casi nadie supera 60'. |
-            | `2ª Parte` | Sin filtro de `>60` | En una mitad, casi nadie supera 60'. |
-            | `1ª + 2ª (Conjunto)` | Sin filtro de `>60` | Evitar perder datos al analizar por mitades. |
-            | `1ª + 2ª (Separadas)` | Sin filtro de `>60` | Mostrar ambas partes aunque los minutos sean parciales. |
-            """
-        )
-        st.caption("En `Individual` no se aplica el filtro `time > 60` en ningún tramo.")
-    
     st.markdown("---")
     
     # ========================================
@@ -229,22 +215,33 @@ def main():
     if len(df_limpio) == 0:
         st.warning("⚠️ No hay datos para el tramo de partido seleccionado.")
         st.stop()
+    df_tramo = df_limpio.copy()
     posiciones_seleccionadas = []
     jugadores_seleccionados = []
+    df_plantilla_cache = None
+
+    def obtener_df_con_posiciones(df_input):
+        nonlocal df_plantilla_cache
+        if 'posicion' in df_input.columns:
+            return df_input.copy()
+        try:
+            if df_plantilla_cache is None:
+                df_plantilla_cache = cargar_plantilla_europa()
+            df_out = df_input.copy()
+            df_out['posicion'] = df_out['player'].apply(
+                lambda x: mapear_posicion(str(x), df_plantilla_cache)
+                if pd.notna(x) and str(x).strip() != '' else 'Sin posición'
+            )
+            return df_out
+        except Exception:
+            st.error("⚠️ No se pudo cargar información de posiciones")
+            st.stop()
     
     if nivel_analisis == 'Por posiciones':
         st.markdown("### 🎯 Seleccionar Posiciones")
         
         # Cargar plantilla para mapear posiciones
-        try:
-            df_plantilla = cargar_plantilla_europa()
-            df_limpio['posicion'] = df_limpio['player'].apply(
-                lambda x: mapear_posicion(str(x), df_plantilla) 
-                if pd.notna(x) and str(x).strip() != '' else 'Sin posición'
-            )
-        except:
-            st.error("⚠️ No se pudo cargar información de posiciones")
-            st.stop()
+        df_limpio = obtener_df_con_posiciones(df_limpio)
         
         posiciones_seleccionadas = st.multiselect(
             "Selecciona posiciones:",
@@ -302,29 +299,37 @@ def main():
             return valores.sum()
         return valores.mean()
     
-    # Obtener fechas únicas ordenadas
-    fechas_disponibles = sorted(df_limpio['date'].unique())
-
-    def aplicar_filtro_minutos(df_in):
+    def aplicar_filtro_minutos(df_in, nivel_analisis_local):
         # Regla >60' solo para vista TOTAL en Equipo/Posiciones.
         # En mitades, aplicar >60' vacía el resultado (minutos por tramo suelen ser <60).
-        if nivel_analisis in ['Equipo', 'Por posiciones'] and filtro_parte == "Total":
+        if nivel_analisis_local in ['Equipo', 'Por posiciones'] and filtro_parte == "Total":
             return df_in[df_in['time'] > 60]
         return df_in
 
-    def construir_datos_grafico(metrica_objetivo):
+    def construir_datos_grafico(
+        metrica_objetivo,
+        nivel_analisis_local=None,
+        df_base_local=None,
+        posiciones_sel=None,
+        jugadores_sel=None,
+    ):
+        nivel_local = nivel_analisis_local or nivel_analisis
+        df_base = df_base_local.copy() if df_base_local is not None else df_limpio.copy()
+        posiciones_sel = posiciones_sel if posiciones_sel is not None else posiciones_seleccionadas
+        jugadores_sel = jugadores_sel if jugadores_sel is not None else jugadores_seleccionados
+        fechas_disponibles_local = sorted(df_base['date'].unique())
         datos = []
 
-        if nivel_analisis == 'Equipo':
+        if nivel_local == 'Equipo':
             # Una barra por partido (estadístico del equipo completo)
-            for fecha in fechas_disponibles:
-                df_fecha_base = df_limpio[df_limpio['date'] == fecha]
+            for fecha in fechas_disponibles_local:
+                df_fecha_base = df_base[df_base['date'] == fecha]
                 subgrupos = [("general", df_fecha_base)]
                 if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_fecha_base.columns:
                     subgrupos = list(df_fecha_base.groupby('tramo_partido'))
 
                 for tramo_key, df_fecha in subgrupos:
-                    df_fecha = aplicar_filtro_minutos(df_fecha)
+                    df_fecha = aplicar_filtro_minutos(df_fecha, nivel_local)
                     if len(df_fecha) == 0:
                         continue
 
@@ -343,7 +348,7 @@ def main():
                         'grupo': nombre_serie
                     })
 
-        elif nivel_analisis == 'Por posiciones':
+        elif nivel_local == 'Por posiciones':
             colores_posicion = {
                 'Defensa': '#ef4444',
                 'Centrocampista': '#3b82f6',
@@ -352,22 +357,22 @@ def main():
 
             colores_individuales = ['#1E88E5', '#FF6F00', '#43A047', '#E53935', '#8E24AA', '#00ACC1']
 
-            if len(posiciones_seleccionadas) == 1:
+            if len(posiciones_sel) == 1:
                 # UNA SOLA POSICIÓN: barras por jugador
-                jugadores_posicion = sorted(df_limpio['player'].unique())
+                jugadores_posicion = sorted(df_base['player'].unique())
 
                 for idx, jugador in enumerate(jugadores_posicion):
-                    for fecha in fechas_disponibles:
-                        df_jug_fecha_base = df_limpio[
-                            (df_limpio['player'] == jugador) &
-                            (df_limpio['date'] == fecha)
+                    for fecha in fechas_disponibles_local:
+                        df_jug_fecha_base = df_base[
+                            (df_base['player'] == jugador) &
+                            (df_base['date'] == fecha)
                         ]
                         subgrupos = [("general", df_jug_fecha_base)]
                         if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_jug_fecha_base.columns:
                             subgrupos = list(df_jug_fecha_base.groupby('tramo_partido'))
 
                         for tramo_key, df_jug_fecha in subgrupos:
-                            df_jug_fecha = aplicar_filtro_minutos(df_jug_fecha)
+                            df_jug_fecha = aplicar_filtro_minutos(df_jug_fecha, nivel_local)
                             if len(df_jug_fecha) == 0:
                                 continue
                             valor = calcular_estadistico(df_jug_fecha[metrica_objetivo], estadistico)
@@ -386,18 +391,18 @@ def main():
                             })
             else:
                 # MÚLTIPLES POSICIONES: barras por posición
-                for posicion in posiciones_seleccionadas:
-                    for fecha in fechas_disponibles:
-                        df_pos_fecha_base = df_limpio[
-                            (df_limpio['posicion'] == posicion) &
-                            (df_limpio['date'] == fecha)
+                for posicion in posiciones_sel:
+                    for fecha in fechas_disponibles_local:
+                        df_pos_fecha_base = df_base[
+                            (df_base['posicion'] == posicion) &
+                            (df_base['date'] == fecha)
                         ]
                         subgrupos = [("general", df_pos_fecha_base)]
                         if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_pos_fecha_base.columns:
                             subgrupos = list(df_pos_fecha_base.groupby('tramo_partido'))
 
                         for tramo_key, df_pos_fecha in subgrupos:
-                            df_pos_fecha = aplicar_filtro_minutos(df_pos_fecha)
+                            df_pos_fecha = aplicar_filtro_minutos(df_pos_fecha, nivel_local)
                             if len(df_pos_fecha) == 0:
                                 continue
                             valor = calcular_estadistico(df_pos_fecha[metrica_objetivo], estadistico)
@@ -418,11 +423,11 @@ def main():
         else:  # Individual
             colores_individuales = ['#1E88E5', '#FF6F00', '#43A047', '#E53935', '#8E24AA', '#00ACC1']
 
-            for idx, jugador in enumerate(jugadores_seleccionados):
-                for fecha in fechas_disponibles:
-                    df_jug_fecha_base = df_limpio[
-                        (df_limpio['player'] == jugador) &
-                        (df_limpio['date'] == fecha)
+            for idx, jugador in enumerate(jugadores_sel):
+                for fecha in fechas_disponibles_local:
+                    df_jug_fecha_base = df_base[
+                        (df_base['player'] == jugador) &
+                        (df_base['date'] == fecha)
                     ]
                     subgrupos = [("general", df_jug_fecha_base)]
                     if filtro_parte == "1ª + 2ª (Separadas)" and 'tramo_partido' in df_jug_fecha_base.columns:
@@ -451,9 +456,67 @@ def main():
     def preparar_df_grafico(datos):
         df_out = pd.DataFrame(datos)
         df_out['fecha'] = pd.to_datetime(df_out['fecha'])
-        df_out['fecha_label'] = df_out['fecha'].dt.strftime('%d/%m')
-        df_out['fecha_full'] = df_out['fecha'].dt.strftime('%d/%m/%Y')
+        sesiones_por_fecha = (
+            df_limpio[['date', 'session']]
+            .dropna(subset=['date'])
+            .assign(date=lambda x: pd.to_datetime(x['date']))
+            .sort_values('date')
+            .groupby('date', as_index=False)['session']
+            .first()
+        )
+        mapa_sesion = {
+            pd.to_datetime(row['date']): str(row['session']).strip()
+            for _, row in sesiones_por_fecha.iterrows()
+            if pd.notna(row['session']) and str(row['session']).strip() != ''
+        }
+
+        df_out['session_label'] = df_out['fecha'].map(mapa_sesion).fillna('')
+        df_out['fecha_base'] = df_out['fecha'].dt.strftime('%d/%m')
+        df_out['fecha_label'] = np.where(
+            df_out['session_label'].str.strip() != '',
+            df_out['session_label'] + ' - ' + df_out['fecha_base'],
+            df_out['fecha_base']
+        )
+        df_out['fecha_full'] = np.where(
+            df_out['session_label'].str.strip() != '',
+            df_out['session_label'] + ' - ' + df_out['fecha'].dt.strftime('%d/%m/%Y'),
+            df_out['fecha'].dt.strftime('%d/%m/%Y')
+        )
         return df_out
+
+    def obtener_contexto_tramo(nombre_serie=None):
+        tramo = filtro_parte
+        if filtro_parte == "1ª + 2ª (Separadas)" and nombre_serie is not None:
+            if str(nombre_serie).endswith(" - 1ª Parte"):
+                tramo = "1ª Parte"
+            elif str(nombre_serie).endswith(" - 2ª Parte"):
+                tramo = "2ª Parte"
+        return tramo
+
+    def obtener_label_minutos(nombre_serie=None):
+        tramo = obtener_contexto_tramo(nombre_serie)
+        if nivel_analisis == "Individual":
+            if tramo == "Total":
+                return "Min total"
+            if tramo == "1ª Parte":
+                return "Min 1ª"
+            if tramo == "2ª Parte":
+                return "Min 2ª"
+            return "Min acum"
+
+        if tramo == "Total":
+            return "Min med"
+        if tramo == "1ª Parte":
+            return "Min med 1ª"
+        if tramo == "2ª Parte":
+            return "Min med 2ª"
+        return "Min med acum"
+
+    def obtener_umbral_minutos(nombre_serie=None):
+        tramo = obtener_contexto_tramo(nombre_serie)
+        if tramo in ["1ª Parte", "2ª Parte"]:
+            return 30
+        return 60
 
     # Crear datos del gráfico para la métrica principal
     datos_grafico = construir_datos_grafico(metrica_col)
@@ -524,11 +587,13 @@ def main():
                 coef = np.polyfit(x_idx, y_vals, 1)
                 df_grupo["trend"] = coef[0] * x_idx + coef[1]
 
+            label_minutos = obtener_label_minutos(nombre)
+            umbral_minutos = obtener_umbral_minutos(nombre)
             texto_barras = [
                 (
                     f"{metrica_nombre_plot}={row['valor']:.1f}<br>"
-                    f"<span style='color:{'#d32f2f' if row['minutaje'] < 60 else '#111111'}'>"
-                    f"Min={int(row['minutaje'])}'</span>"
+                    f"<span style='color:{'#d32f2f' if row['minutaje'] < umbral_minutos else '#111111'}'>"
+                    f"{label_minutos}={int(row['minutaje'])}'</span>"
                 )
                 for _, row in df_grupo.iterrows()
             ]
@@ -546,7 +611,7 @@ def main():
                     '<b>%{customdata[0]}</b><br>' +
                     f'{nombre}<br>' +
                     f'{metrica_nombre_plot}: %{{y:.1f}}<br>' +
-                    'Minutos: %{customdata[1]:.0f}<br>' +
+                    f'{label_minutos}: %{{customdata[1]:.0f}}\'<br>' +
                     '<extra></extra>'
                 ),
                 customdata=np.column_stack((
@@ -612,6 +677,27 @@ def main():
     fig = crear_figura_plotly(df_grafico, metrica_nombre, mostrar_tendencia=mostrar_tendencia_lineal)
     
     st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("ℹ️ Cómo se interpretan las etiquetas de minutos"):
+        st.markdown(
+            """
+            | Nivel de análisis | Tramo | Etiqueta mostrada | Qué representa |
+            |---|---|---|---|
+            | `Individual` | `Total` | `Min total` | Minutos reales del jugador en el partido completo. |
+            | `Individual` | `1ª Parte` | `Min 1ª` | Minutos reales del jugador en la primera parte. |
+            | `Individual` | `2ª Parte` | `Min 2ª` | Minutos reales del jugador en la segunda parte. |
+            | `Individual` | `1ª + 2ª (Conjunto)` | `Min acum` | Minutos acumulados del jugador al unir ambas partes. |
+            | `Individual` | `1ª + 2ª (Separadas)` | `Min 1ª` / `Min 2ª` | Minutos reales del jugador en cada tramo mostrado por separado. |
+            | `Equipo` / `Por posiciones` | `Total` | `Min med` | Minutaje medio del grupo que entra en el cálculo. En `Total` solo cuentan jugadores con `time > 60`. |
+            | `Equipo` / `Por posiciones` | `1ª Parte` | `Min med 1ª` | Minutaje medio del grupo en la primera parte, sin filtro de `>60`. |
+            | `Equipo` / `Por posiciones` | `2ª Parte` | `Min med 2ª` | Minutaje medio del grupo en la segunda parte, sin filtro de `>60`. |
+            | `Equipo` / `Por posiciones` | `1ª + 2ª (Conjunto)` | `Min med acum` | Minutaje medio del grupo al unir ambas partes, sin filtro de `>60`. |
+            | `Equipo` / `Por posiciones` | `1ª + 2ª (Separadas)` | `Min med 1ª` / `Min med 2ª` | Minutaje medio del grupo en cada tramo mostrado por separado. |
+            """
+        )
+        st.caption(
+            "El color rojo marca un minutaje bajo para el tramo mostrado: umbral de 60' en `Total` y `1ª + 2ª (Conjunto)`, y 30' en `1ª Parte`, `2ª Parte` y `1ª + 2ª (Separadas)`."
+        )
 
     # Resumen de tendencia con semáforo
     resumen_tendencia = []
@@ -689,38 +775,126 @@ def main():
     # ========================================
     st.markdown("---")
     st.subheader("📄 Informe PDF")
+    st.caption("El informe usa los filtros actuales de partidos y tramo. Aquí puedes decidir qué bloques incluir.")
 
-    todas_metricas_pdf = st.checkbox(
-        "Seleccionar todas las métricas",
-        key="todas_metricas_pdf_equipo",
+    incluir_bloque_equipo_pdf = st.checkbox(
+        "Incluir bloque Equipo",
+        key="incluir_bloque_equipo_pdf",
+        value=(nivel_analisis == "Equipo")
+    )
+
+    metricas_equipo_pdf = []
+    if incluir_bloque_equipo_pdf:
+        todas_metricas_equipo_pdf = st.checkbox(
+            "Seleccionar todas las métricas del bloque Equipo",
+            key="todas_metricas_equipo_pdf",
+            value=False
+        )
+        if todas_metricas_equipo_pdf:
+            metricas_equipo_pdf = list(metricas_disponibles.keys())
+            st.caption(f"Bloque Equipo: se incluirán todas las métricas ({len(metricas_equipo_pdf)}).")
+        else:
+            metricas_equipo_pdf = st.multiselect(
+                "Métricas del bloque Equipo:",
+                options=list(metricas_disponibles.keys()),
+                default=[metrica_nombre],
+                key="metricas_equipo_pdf",
+                help="Métricas que se incluirán en la sección de equipo."
+            )
+
+    incluir_bloque_posiciones_pdf = st.checkbox(
+        "Incluir bloque Posiciones",
+        key="incluir_bloque_posiciones_pdf",
+        value=(nivel_analisis == "Por posiciones")
+    )
+
+    posiciones_pdf_seleccionadas = []
+    metricas_posiciones_pdf = []
+    if incluir_bloque_posiciones_pdf:
+        df_posiciones_pdf = obtener_df_con_posiciones(df_tramo)
+        opciones_posiciones_pdf = ['Defensa', 'Centrocampista', 'Delantero']
+        posiciones_pdf_seleccionadas = st.multiselect(
+            "Posiciones a incluir en el bloque Posiciones:",
+            options=opciones_posiciones_pdf,
+            default=posiciones_seleccionadas if posiciones_seleccionadas else opciones_posiciones_pdf,
+            key="posiciones_pdf_seleccionadas"
+        )
+        todas_metricas_posiciones_pdf = st.checkbox(
+            "Seleccionar todas las métricas del bloque Posiciones",
+            key="todas_metricas_posiciones_pdf",
+            value=False
+        )
+        if todas_metricas_posiciones_pdf:
+            metricas_posiciones_pdf = list(metricas_disponibles.keys())
+            st.caption(f"Bloque Posiciones: se incluirán todas las métricas ({len(metricas_posiciones_pdf)}).")
+        else:
+            metricas_posiciones_pdf = st.multiselect(
+                "Métricas del bloque Posiciones:",
+                options=list(metricas_disponibles.keys()),
+                default=[metrica_nombre],
+                key="metricas_posiciones_pdf"
+            )
+
+    incluir_bloque_individual_pdf = st.checkbox(
+        "Incluir bloque Individual",
+        key="incluir_bloque_individual_pdf",
+        value=(nivel_analisis == "Individual")
+    )
+
+    jugadores_pdf_seleccionados = []
+    metricas_individual_pdf = []
+    if incluir_bloque_individual_pdf:
+        jugadores_pdf_disponibles = sorted(df_tramo['player'].dropna().astype(str).unique().tolist())
+        jugadores_pdf_seleccionados = st.multiselect(
+            "Jugadores a incluir en el bloque Individual:",
+            options=jugadores_pdf_disponibles,
+            default=jugadores_seleccionados if jugadores_seleccionados else jugadores_pdf_disponibles[:min(3, len(jugadores_pdf_disponibles))],
+            key="jugadores_pdf_seleccionados"
+        )
+        todas_metricas_individual_pdf = st.checkbox(
+            "Seleccionar todas las métricas del bloque Individual",
+            key="todas_metricas_individual_pdf",
+            value=False
+        )
+        if todas_metricas_individual_pdf:
+            metricas_individual_pdf = list(metricas_disponibles.keys())
+            st.caption(f"Bloque Individual: se incluirán todas las métricas ({len(metricas_individual_pdf)}).")
+        else:
+            metricas_individual_pdf = st.multiselect(
+                "Métricas del bloque Individual:",
+                options=list(metricas_disponibles.keys()),
+                default=[metrica_nombre],
+                key="metricas_individual_pdf"
+            )
+
+    mostrar_tendencia_pdf = st.checkbox(
+        "Incluir líneas de tendencia en el PDF",
+        key="mostrar_tendencia_pdf_equipo",
         value=False
     )
 
-    if todas_metricas_pdf:
-        metricas_pdf = list(metricas_disponibles.keys())
-        st.caption(f"Se incluirán todas las métricas disponibles ({len(metricas_pdf)}).")
-    else:
-        metricas_pdf = st.multiselect(
-            "Métricas a incluir en el informe:",
-            options=list(metricas_disponibles.keys()),
-            default=[metrica_nombre],
-            key="metricas_pdf_equipo",
-            help="Incluye la métrica visible y añade las que quieras para el informe."
-        )
+    incluir_tabla_tendencia_pdf = st.checkbox(
+        "Incluir tabla de semáforo de tendencia en el PDF",
+        key="incluir_tabla_tendencia_pdf_equipo",
+        value=False
+    )
 
     incluir_detalle_individual = st.checkbox(
         "Añadir detalle individual de jugadores al final del informe",
         key="incluir_detalle_individual_pdf",
-        value=False
+        value=(nivel_analisis == "Individual")
     )
 
     jugadores_detalle_pdf = []
     if incluir_detalle_individual:
-        if nivel_analisis == "Individual":
+        if incluir_bloque_individual_pdf and len(jugadores_pdf_seleccionados) > 0:
+            jugadores_detalle_pdf = jugadores_pdf_seleccionados.copy()
+            st.caption(f"Detalle individual: {len(jugadores_detalle_pdf)} jugador(es) del bloque Individual.")
+        elif nivel_analisis == "Individual":
             jugadores_detalle_pdf = jugadores_seleccionados.copy()
             st.caption(f"Detalle individual: {len(jugadores_detalle_pdf)} jugador(es) seleccionados en el análisis.")
         else:
-            jugadores_detalle_pdf = sorted(df_limpio['player'].dropna().astype(str).unique().tolist())
+            jugadores_detalle_pdf = sorted(df_tramo['player'].dropna().astype(str).unique().tolist())
             st.caption(f"Detalle individual: {len(jugadores_detalle_pdf)} jugador(es) según el filtro actual.")
 
     comentario_pdf = st.text_area(
@@ -750,6 +924,17 @@ def main():
         return f"Rango de fechas personalizado | Tramo: {filtro_parte}"
 
     def construir_texto_alcance():
+        bloques = []
+        if incluir_bloque_equipo_pdf:
+            bloques.append("Equipo completo")
+        if incluir_bloque_posiciones_pdf and len(posiciones_pdf_seleccionadas) > 0:
+            bloques.append("Posiciones: " + ", ".join(posiciones_pdf_seleccionadas))
+        if incluir_bloque_individual_pdf and len(jugadores_pdf_seleccionados) > 0:
+            bloques.append("Jugadores: " + ", ".join(jugadores_pdf_seleccionados))
+
+        if bloques:
+            return " | ".join(bloques)
+
         if nivel_analisis == 'Equipo':
             return "Equipo completo"
         if nivel_analisis == 'Por posiciones':
@@ -759,36 +944,185 @@ def main():
             return f"Posiciones: {', '.join(posiciones_seleccionadas)}"
         return f"Jugadores: {', '.join(jugadores_seleccionados)}"
 
+    def construir_resumen_bloques_pdf():
+        resumen = []
+        if incluir_bloque_equipo_pdf:
+            resumen.append({
+                "bloque": "EQUIPO",
+                "alcance": "Equipo completo",
+                "metricas": "Todas las métricas" if len(metricas_equipo_pdf) == len(metricas_disponibles) else ", ".join(metricas_equipo_pdf),
+            })
+        if incluir_bloque_posiciones_pdf and len(posiciones_pdf_seleccionadas) > 0:
+            resumen.append({
+                "bloque": "POSICIONES",
+                "alcance": ", ".join(posiciones_pdf_seleccionadas),
+                "metricas": "Todas las métricas" if len(metricas_posiciones_pdf) == len(metricas_disponibles) else ", ".join(metricas_posiciones_pdf),
+            })
+        if incluir_bloque_individual_pdf and len(jugadores_pdf_seleccionados) > 0:
+            resumen.append({
+                "bloque": "JUGADORES",
+                "alcance": ", ".join(jugadores_pdf_seleccionados),
+                "metricas": "Todas las métricas" if len(metricas_individual_pdf) == len(metricas_disponibles) else ", ".join(metricas_individual_pdf),
+            })
+        return resumen
+
+    def construir_periodo_corto():
+        def extraer_jornada(texto):
+            txt = str(texto).strip().lower()
+            match = re.search(r'\bj\s*(\d+)\b', txt)
+            if not match:
+                match = re.search(r'jornada\s*(\d+)', txt)
+            if not match:
+                match = re.search(r'(\d+)', txt)
+            return f"J{int(match.group(1))}" if match else None
+
+        jornadas = []
+        if 'session' in df_tramo.columns:
+            for sesion in df_tramo['session'].dropna().tolist():
+                jornada = extraer_jornada(sesion)
+                if jornada and jornada not in jornadas:
+                    jornadas.append(jornada)
+
+        def extraer_num_jornada(texto):
+            match = re.search(r'(\d+)', str(texto))
+            return int(match.group(1)) if match else None
+
+        if jornadas:
+            jornadas_ordenadas = sorted(
+                jornadas,
+                key=lambda s: (extraer_num_jornada(s) is None, extraer_num_jornada(s) or 9999, str(s))
+            )
+            if len(jornadas_ordenadas) == 1:
+                return jornadas_ordenadas[0]
+            return f"{jornadas_ordenadas[0]}-{jornadas_ordenadas[-1]}"
+
+        fechas = sorted(pd.to_datetime(df_tramo['date']).dropna().unique().tolist())
+        if len(fechas) == 1:
+            return pd.to_datetime(fechas[0]).strftime('%d-%m-%y')
+        if len(fechas) > 1:
+            return f"{pd.to_datetime(fechas[0]).strftime('%d-%m-%y')} - {pd.to_datetime(fechas[-1]).strftime('%d-%m-%y')}"
+        return "Periodo"
+
+    def construir_periodo_portada():
+        periodo_corto = construir_periodo_corto()
+        if re.fullmatch(r'J\d+', periodo_corto):
+            return f"De jornada {periodo_corto} a jornada {periodo_corto}"
+        if re.fullmatch(r'J\d+-J\d+', periodo_corto):
+            j_ini, j_fin = periodo_corto.split('-')
+            return f"De jornada {j_ini} a jornada {j_fin}"
+        return periodo_corto
+
+    def construir_nombre_archivo_pdf():
+        def sanitizar(texto):
+            txt = str(texto).strip()
+            txt = unicodedata.normalize("NFKD", txt)
+            txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+            txt = re.sub(r"[^A-Za-z0-9]+", "_", txt)
+            return txt.strip("_") or "NA"
+
+        bloques_activos = []
+        if incluir_bloque_equipo_pdf:
+            bloques_activos.append("Equipo")
+        if incluir_bloque_posiciones_pdf:
+            bloques_activos.append("Posiciones")
+        if incluir_bloque_individual_pdf:
+            bloques_activos.append("Individual")
+
+        if len(bloques_activos) > 1:
+            nivel_nombre = "Mixto"
+            alcance_nombre = "Grupo"
+        elif incluir_bloque_equipo_pdf:
+            nivel_nombre = "Equipo"
+            alcance_nombre = "Equipo"
+        elif incluir_bloque_posiciones_pdf:
+            nivel_nombre = "Por posiciones"
+            alcance_nombre = posiciones_pdf_seleccionadas[0] if len(posiciones_pdf_seleccionadas) == 1 else "Grupo"
+        elif incluir_bloque_individual_pdf:
+            nivel_nombre = "Individual"
+            alcance_nombre = jugadores_pdf_seleccionados[0] if len(jugadores_pdf_seleccionados) == 1 else "Grupo"
+        else:
+            nivel_nombre = nivel_analisis
+            alcance_nombre = "Grupo"
+
+        periodo_nombre = construir_periodo_corto()
+        return f"InformeEquipo_{sanitizar(nivel_nombre)}_{sanitizar(alcance_nombre)}_{sanitizar(periodo_nombre)}.pdf"
+
     if st.button("📥 Generar informe PDF", type="primary", use_container_width=True):
-        if len(metricas_pdf) == 0:
-            st.warning("⚠️ Selecciona al menos una métrica para el informe.")
+        if not any([incluir_bloque_equipo_pdf, incluir_bloque_posiciones_pdf, incluir_bloque_individual_pdf]):
+            st.warning("⚠️ Selecciona al menos un bloque para el informe.")
+        elif incluir_bloque_equipo_pdf and len(metricas_equipo_pdf) == 0:
+            st.warning("⚠️ Selecciona al menos una métrica para el bloque Equipo.")
+        elif incluir_bloque_posiciones_pdf and (len(posiciones_pdf_seleccionadas) == 0 or len(metricas_posiciones_pdf) == 0):
+            st.warning("⚠️ Selecciona posiciones y métricas para el bloque Posiciones.")
+        elif incluir_bloque_individual_pdf and (len(jugadores_pdf_seleccionados) == 0 or len(metricas_individual_pdf) == 0):
+            st.warning("⚠️ Selecciona jugadores y métricas para el bloque Individual.")
         elif incluir_detalle_individual and len(jugadores_detalle_pdf) == 0:
             st.warning("⚠️ Selecciona al menos un jugador para el detalle individual.")
         else:
             with st.spinner("Generando informe PDF..."):
                 metricas_para_pdf = []
 
-                for metrica_pdf_nombre in metricas_pdf:
-                    metrica_pdf_col = METRICAS_DICT[metrica_pdf_nombre]
-                    datos_pdf = construir_datos_grafico(metrica_pdf_col)
-                    if len(datos_pdf) == 0:
-                        continue
-                    df_grafico_pdf = preparar_df_grafico(datos_pdf)
-                    metricas_para_pdf.append({
-                        "metrica_nombre": metrica_pdf_nombre,
-                        "df_grafico": df_grafico_pdf,
-                        "plotly_fig": crear_figura_plotly(
-                            df_grafico_pdf,
-                            metrica_pdf_nombre,
-                            mostrar_tendencia=mostrar_tendencia_lineal
-                        ),
-                        "mostrar_tendencia": mostrar_tendencia_lineal
-                    })
+                def agregar_metricas_bloque(nombre_bloque, nivel_bloque, metricas_bloque, df_base_bloque, posiciones_bloque=None, jugadores_bloque=None):
+                    for metrica_pdf_nombre in metricas_bloque:
+                        metrica_pdf_col = METRICAS_DICT[metrica_pdf_nombre]
+                        datos_pdf = construir_datos_grafico(
+                            metrica_pdf_col,
+                            nivel_analisis_local=nivel_bloque,
+                            df_base_local=df_base_bloque,
+                            posiciones_sel=posiciones_bloque,
+                            jugadores_sel=jugadores_bloque,
+                        )
+                        if len(datos_pdf) == 0:
+                            continue
+                        df_grafico_pdf = preparar_df_grafico(datos_pdf)
+                        metricas_para_pdf.append({
+                            "bloque_nombre": nombre_bloque,
+                            "nivel_analisis": nivel_bloque,
+                            "metrica_nombre": metrica_pdf_nombre,
+                            "df_grafico": df_grafico_pdf,
+                            "plotly_fig": crear_figura_plotly(
+                                df_grafico_pdf,
+                                metrica_pdf_nombre,
+                                mostrar_tendencia=mostrar_tendencia_pdf
+                            ),
+                            "mostrar_tendencia": mostrar_tendencia_pdf,
+                            "incluir_tabla_tendencia": incluir_tabla_tendencia_pdf
+                        })
+
+                if incluir_bloque_equipo_pdf:
+                    agregar_metricas_bloque(
+                        nombre_bloque="Equipo",
+                        nivel_bloque="Equipo",
+                        metricas_bloque=metricas_equipo_pdf,
+                        df_base_bloque=df_tramo,
+                    )
+
+                if incluir_bloque_posiciones_pdf:
+                    df_posiciones_bloque = obtener_df_con_posiciones(df_tramo)
+                    df_posiciones_bloque = df_posiciones_bloque[df_posiciones_bloque['posicion'].isin(posiciones_pdf_seleccionadas)]
+                    agregar_metricas_bloque(
+                        nombre_bloque="Posiciones",
+                        nivel_bloque="Por posiciones",
+                        metricas_bloque=metricas_posiciones_pdf,
+                        df_base_bloque=df_posiciones_bloque,
+                        posiciones_bloque=posiciones_pdf_seleccionadas,
+                    )
+
+                if incluir_bloque_individual_pdf:
+                    df_individual_bloque = df_tramo[df_tramo['player'].isin(jugadores_pdf_seleccionados)].copy()
+                    agregar_metricas_bloque(
+                        nombre_bloque="Individual",
+                        nivel_bloque="Individual",
+                        metricas_bloque=metricas_individual_pdf,
+                        df_base_bloque=df_individual_bloque,
+                        jugadores_bloque=jugadores_pdf_seleccionados,
+                    )
 
                 detalles_jugadores_pdf = []
                 if incluir_detalle_individual:
+                    metricas_detalle_individual = metricas_individual_pdf if len(metricas_individual_pdf) > 0 else metricas_equipo_pdf
                     for jugador in jugadores_detalle_pdf:
-                        df_jugador = df_limpio[df_limpio['player'] == jugador].copy()
+                        df_jugador = df_tramo[df_tramo['player'] == jugador].copy()
                         if len(df_jugador) == 0:
                             continue
 
@@ -801,7 +1135,7 @@ def main():
                         min_min = float(minutos_jugador.min()) if len(minutos_jugador) > 0 else np.nan
 
                         tarjetas = []
-                        for metrica_pdf_nombre in metricas_pdf:
+                        for metrica_pdf_nombre in metricas_detalle_individual:
                             metrica_col_det = METRICAS_DICT[metrica_pdf_nombre]
                             if metrica_col_det not in df_jugador.columns:
                                 continue
@@ -839,14 +1173,19 @@ def main():
                 if len(metricas_para_pdf) == 0:
                     st.error("❌ No se pudo generar el informe con la selección actual.")
                 else:
+                    bloques_activos = [b for b in ["Equipo" if incluir_bloque_equipo_pdf else None, "Posiciones" if incluir_bloque_posiciones_pdf else None, "Individual" if incluir_bloque_individual_pdf else None] if b]
+                    nivel_informe_pdf = "Mixto" if len(bloques_activos) > 1 else bloques_activos[0]
                     output_path = generar_pdf_equipo(
                         metricas_pdf=metricas_para_pdf,
                         estadistico=estadistico,
-                        nivel_analisis=nivel_analisis,
+                        nivel_analisis=nivel_informe_pdf,
                         filtro_texto=construir_texto_filtro(),
                         alcance_texto=construir_texto_alcance(),
                         comentario=comentario_pdf,
-                        detalles_jugadores=detalles_jugadores_pdf
+                        detalles_jugadores=detalles_jugadores_pdf,
+                        periodo_portada=construir_periodo_portada(),
+                        output_filename=construir_nombre_archivo_pdf(),
+                        resumen_bloques=construir_resumen_bloques_pdf()
                     )
                     with open(output_path, "rb") as f:
                         pdf_bytes = f.read()

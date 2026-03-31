@@ -94,13 +94,13 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
             .tolist()
         )
 
-    fig, ax = plt.subplots(figsize=(12, 5.8))
+    fig, ax = plt.subplots(figsize=(12, 4.6))
     x = np.arange(len(fechas))
     total_series = max(len(nombres), 1)
     width = min(0.7 / total_series, 0.32)
     total_barras = max(len(fechas) * total_series, 1)
-    fontsize_valor = max(9, min(14, int(15 - (total_barras * 0.15))))
-    fontsize_min = max(8, fontsize_valor - 1)
+    fontsize_valor = max(9, min(14, int(15 - (total_barras * 0.14))))
+    fontsize_min = max(7, fontsize_valor - 2)
 
     max_y = float(df_plot["valor"].max())
 
@@ -128,7 +128,7 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
             ax.annotate(
                 f"{valores[i_bar]:.1f}",
                 (x_bar, y_bar),
-                xytext=(0, 8),
+                xytext=(0, 11),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
@@ -138,12 +138,13 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
             ax.annotate(
                 f"Min={int(round(minutos[i_bar]))}'",
                 (x_bar, y_bar),
-                xytext=(0, -2),
+                xytext=(0, 2),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
                 fontsize=fontsize_min,
                 color=min_color,
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.72, pad=0.15),
             )
 
         # Línea de tendencia lineal opcional en el fallback de matplotlib.
@@ -171,7 +172,7 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
     ax.tick_params(axis="y", labelsize=12)
     ax.grid(axis="y", alpha=0.25)
     ax.set_axisbelow(True)
-    ax.set_ylim(0, max_y * 1.22)
+    ax.set_ylim(0, max_y * 1.28)
 
     if nivel_analisis != "Equipo" and len(nombres) > 1:
         ax.legend(loc="upper right", frameon=False, ncol=min(len(nombres), 4), fontsize=11)
@@ -222,7 +223,7 @@ def _crear_png_desde_plotly(fig):
             uniformtext=dict(minsize=size_label, mode="show"),
         )
 
-        png_bytes = fig_pdf.to_image(format="png", width=1800, height=1050, scale=2)
+        png_bytes = fig_pdf.to_image(format="png", width=1800, height=760, scale=2)
     except Exception:
         return None
 
@@ -325,6 +326,94 @@ def _dibujar_tabla_tendencia(pdf, resumen_tendencia):
         pdf.set_font("Arial", "I", 8)
         pdf.set_text_color(120, 120, 120)
         pdf.cell(0, 5, f"Mostrando {max_rows} series de {len(resumen_tendencia)}", 0, 1, "R")
+
+
+def _dibujar_tabla_tendencia_compacta(pdf, resumen_tendencia, x=15, y=None, ancho_total=180, max_rows=4):
+    if not resumen_tendencia:
+        return 0
+
+    resumen = resumen_tendencia[:max_rows]
+    if y is not None:
+        pdf.set_xy(x, y)
+    else:
+        pdf.set_x(x)
+
+    pdf.set_font("Arial", "B", 8)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(ancho_total, 5, "Semaforo de tendencia", 0, 1)
+
+    pdf.set_draw_color(200, 205, 210)
+    pdf.set_line_width(0.2)
+
+    headers = ["Serie", "Semaforo", "Lectura", "Pend.", "Cambio %"]
+    widths = [68, 28, 26, 24, 34]
+    row_h = 4.5
+
+    pdf.set_x(x)
+    pdf.set_font("Arial", "B", 7)
+    pdf.set_text_color(50, 50, 50)
+    for h, w in zip(headers, widths):
+        pdf.cell(w, row_h, h, 1, 0, "C")
+    pdf.ln(row_h)
+
+    for row in resumen:
+        pdf.set_x(x)
+        pdf.set_font("Arial", "", 7)
+        pdf.set_text_color(40, 40, 40)
+        pdf.cell(widths[0], row_h, str(row["Serie"])[:24], 1, 0, "L")
+
+        if row["Semaforo"] == "VERDE":
+            pdf.set_text_color(22, 163, 74)
+        elif row["Semaforo"] == "ROJO":
+            pdf.set_text_color(220, 38, 38)
+        else:
+            pdf.set_text_color(202, 138, 4)
+        pdf.cell(widths[1], row_h, row["Semaforo"], 1, 0, "C")
+
+        pdf.set_text_color(40, 40, 40)
+        pdf.cell(widths[2], row_h, row["Lectura"], 1, 0, "C")
+        pdf.cell(widths[3], row_h, f"{row['Pendiente']:.2f}", 1, 0, "C")
+        cambio = row["CambioPct"]
+        cambio_txt = "-" if pd.isna(cambio) else f"{cambio:.1f}%"
+        pdf.cell(widths[4], row_h, cambio_txt, 1, 1, "C")
+
+    if len(resumen_tendencia) > max_rows:
+        pdf.set_x(x)
+        pdf.set_font("Arial", "I", 6)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(ancho_total, 4, f"Mostrando {max_rows} de {len(resumen_tendencia)} series", 0, 1, "R")
+
+    return pdf.get_y()
+
+
+def _dibujar_separador_bloques(pdf, y):
+    pdf.set_draw_color(*pdf.COLOR_AZUL)
+    pdf.set_line_width(0.35)
+    pdf.line(26, y, 184, y)
+
+
+def _agregar_portada_bloque(pdf, titulo_bloque):
+    pdf.add_page()
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(0, 0, 210, 297, "F")
+
+    pdf.set_draw_color(*pdf.COLOR_AZUL)
+    pdf.set_line_width(3)
+    pdf.line(40, 20, 40, 277)
+
+    escudo_path = obtener_escudo_path()
+    if os.path.exists(escudo_path):
+        pdf.image(escudo_path, x=10, y=20, w=25)
+
+    pdf.set_xy(10, 260)
+    pdf.set_font("Arial", "I", 12)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(30, 10, "Alex Bosch", 0, 0, "L")
+
+    pdf.set_xy(50, 132)
+    pdf.set_font("Arial", "B", 24)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(150, 12, f"BLOQUE {titulo_bloque.upper()}", 0, 1, "C")
 
 
 def _escribir_texto_largo(pdf, texto, alto_linea=6):
@@ -513,6 +602,8 @@ def _agregar_detalle_individual(pdf, detalles_jugadores):
     if not detalles_jugadores:
         return
 
+    _agregar_portada_bloque(pdf, "Jugadores")
+
     for jugador_data in detalles_jugadores:
         nombre = jugador_data.get("jugador", "Jugador")
         posicion = jugador_data.get("posicion", "Sin posición")
@@ -579,6 +670,82 @@ def _agregar_detalle_individual(pdf, detalles_jugadores):
         pdf.set_y(min(270, y_base + (filas * 40) + 4))
 
 
+def _dibujar_bloque_metrica(pdf, metrica_data, estadistico, nivel_analisis, y_inicio, alto_bloque=118):
+    bloque_nombre = metrica_data.get("bloque_nombre", nivel_analisis)
+    metrica_nombre = metrica_data["metrica_nombre"]
+    df_grafico = metrica_data["df_grafico"]
+    plotly_fig = metrica_data.get("plotly_fig")
+    mostrar_tendencia = bool(metrica_data.get("mostrar_tendencia", False))
+    incluir_tabla_tendencia = bool(metrica_data.get("incluir_tabla_tendencia", False))
+
+    if df_grafico is None or df_grafico.empty:
+        return False
+
+    png_path = _crear_grafico_png(
+        df_grafico,
+        metrica_nombre,
+        estadistico,
+        nivel_analisis,
+        mostrar_tendencia=mostrar_tendencia,
+    )
+    if not png_path:
+        return False
+
+    x_base = 10
+    ancho_bloque = 190
+    pdf.set_xy(x_base, y_inicio)
+    pdf.set_font("Arial", "B", 8)
+    pdf.set_text_color(90, 90, 90)
+    pdf.cell(ancho_bloque, 4, f"Bloque: {bloque_nombre}", 0, 1)
+
+    pdf.set_x(x_base)
+    pdf.set_font("Arial", "B", 12)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(ancho_bloque, 6, f"Metrica: {metrica_nombre}", 0, 1)
+
+    pdf.set_x(x_base)
+    pdf.set_font("Arial", "", 8)
+    pdf.set_text_color(80, 80, 80)
+    if mostrar_tendencia and incluir_tabla_tendencia:
+        texto_info = "Grafico con linea de tendencia y tabla de semaforo."
+    elif mostrar_tendencia:
+        texto_info = "Grafico con linea de tendencia."
+    elif incluir_tabla_tendencia:
+        texto_info = "Grafico sin linea de tendencia, con tabla de semaforo."
+    else:
+        texto_info = "Grafico sin linea de tendencia."
+    pdf.cell(ancho_bloque, 4, texto_info, 0, 1)
+
+    pdf.image(png_path, x=15, y=y_inicio + 11, w=175)
+    os.unlink(png_path)
+
+    y_resumen = y_inicio + 83
+    pdf.set_xy(15, y_resumen)
+    pdf.set_font("Arial", "B", 8)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(0, 5, "Resumen rapido", 0, 1)
+
+    pdf.set_x(15)
+    pdf.set_font("Arial", "", 7)
+    pdf.set_text_color(60, 60, 60)
+    media = float(df_grafico["valor"].mean())
+    maximo = float(df_grafico["valor"].max())
+    minimo = float(df_grafico["valor"].min())
+    min_media = float(df_grafico["minutaje"].mean())
+    resumen_txt = (
+        f"Valor medio: {media:.2f} | Maximo: {maximo:.2f} | "
+        f"Minimo: {minimo:.2f} | Minutos medios: {min_media:.1f}"
+    )
+    pdf.multi_cell(180, 4, resumen_txt)
+
+    if incluir_tabla_tendencia:
+        resumen_tendencia = _calcular_resumen_tendencia(df_grafico)
+        _dibujar_tabla_tendencia_compacta(pdf, resumen_tendencia, x=15, y=max(pdf.get_y() + 1, y_inicio + 92), ancho_total=180, max_rows=4)
+
+    pdf.set_y(y_inicio + alto_bloque)
+    return True
+
+
 def generar_pdf_equipo(
     metricas_pdf,
     estadistico,
@@ -587,6 +754,9 @@ def generar_pdf_equipo(
     alcance_texto,
     comentario,
     detalles_jugadores=None,
+    periodo_portada="Periodo",
+    output_filename=None,
+    resumen_bloques=None,
 ):
     """
     Genera informe PDF de análisis de equipo.
@@ -597,10 +767,9 @@ def generar_pdf_equipo(
     """
     pdf = PDFEquipo()
 
-    # Portada (estilo corporativo)
+    # Portada
     pdf.add_page()
 
-    # Fondo blanco
     pdf.set_fill_color(255, 255, 255)
     pdf.rect(0, 0, 210, 297, "F")
 
@@ -620,21 +789,31 @@ def generar_pdf_equipo(
     pdf.set_text_color(100, 100, 100)
     pdf.cell(30, 10, "Alex Bosch", 0, 0, "L")
 
-    # Bloque de título a la derecha de la línea
-    pdf.set_xy(50, 130)
-    pdf.set_font("Arial", "B", 28)
+    # Bloque central
+    titulo_y = 118
+    subtitulo_y = 138
+    periodo_y = 152
+    fecha_y = 165
+
+    pdf.set_xy(50, titulo_y)
+    pdf.set_font("Arial", "B", 24)
     pdf.set_text_color(*pdf.COLOR_AZUL)
-    pdf.multi_cell(150, 12, "Informe de Equipo", 0, "C")
+    pdf.cell(150, 12, "INFORME DE EQUIPO", 0, 1, "C")
 
-    pdf.set_xy(50, pdf.get_y() + 10)
-    pdf.set_font("Arial", "", 12)
+    pdf.set_xy(50, subtitulo_y)
+    pdf.set_font("Arial", "", 14)
     pdf.set_text_color(80, 80, 80)
-    pdf.cell(150, 10, "Europa FC - Analisis GPS", 0, 1, "C")
+    pdf.cell(150, 8, "Valores de Referencia de Partidos", 0, 1, "C")
 
-    pdf.set_xy(50, pdf.get_y() + 2)
-    pdf.set_font("Arial", "I", 11)
+    pdf.set_xy(50, periodo_y)
+    pdf.set_font("Arial", "B", 13)
     pdf.set_text_color(110, 110, 110)
-    pdf.cell(150, 8, datetime.now().strftime("%d/%m/%Y %H:%M"), 0, 1, "C")
+    pdf.cell(150, 8, f"({periodo_portada})", 0, 1, "C")
+
+    pdf.set_xy(50, fecha_y)
+    pdf.set_font("Arial", "", 12)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(150, 8, f"Fecha: {datetime.now().strftime('%d/%m/%y')}", 0, 1, "C")
 
     # Resumen
     pdf.add_page()
@@ -648,10 +827,16 @@ def generar_pdf_equipo(
     _escribir_texto_largo(pdf, f"Estadistico: {estadistico}")
     _escribir_texto_largo(pdf, f"Filtro de partidos: {filtro_texto}")
     _escribir_texto_largo(pdf, f"Alcance: {alcance_texto}")
-    _escribir_texto_largo(
-        pdf,
-        "Metricas incluidas: " + ", ".join([m["metrica_nombre"] for m in metricas_pdf]),
-    )
+    if resumen_bloques:
+        _escribir_texto_largo(pdf, "Bloques incluidos: " + ", ".join([b["bloque"].title() for b in resumen_bloques]))
+        for bloque in resumen_bloques:
+            _escribir_texto_largo(pdf, f"Alcance {bloque['bloque'].title()}: {bloque['alcance']}")
+            _escribir_texto_largo(pdf, f"Metricas {bloque['bloque'].title()}: {bloque['metricas']}")
+    else:
+        _escribir_texto_largo(
+            pdf,
+            "Metricas incluidas: " + ", ".join([m["metrica_nombre"] for m in metricas_pdf]),
+        )
     if detalles_jugadores:
         _escribir_texto_largo(
             pdf,
@@ -665,69 +850,55 @@ def generar_pdf_equipo(
         pdf.cell(0, 8, "Comentarios", 0, 1)
         _dibujar_caja_comentarios(pdf, comentario.strip())
 
-    # Pagina por metrica
-    for metrica_data in metricas_pdf:
-        metrica_nombre = metrica_data["metrica_nombre"]
-        df_grafico = metrica_data["df_grafico"]
-        plotly_fig = metrica_data.get("plotly_fig")
-        mostrar_tendencia = bool(metrica_data.get("mostrar_tendencia", False))
-        if df_grafico is None or df_grafico.empty:
-            continue
+    metricas_validas = [
+        metrica_data
+        for metrica_data in metricas_pdf
+        if metrica_data.get("df_grafico") is not None and not metrica_data.get("df_grafico").empty
+    ]
 
-        png_path = _crear_png_desde_plotly(plotly_fig) if plotly_fig is not None else None
-        if not png_path:
-            png_path = _crear_grafico_png(
-                df_grafico,
-                metrica_nombre,
+    bloques_ordenados = []
+    for metrica_data in metricas_validas:
+        bloque_nombre = metrica_data.get("bloque_nombre", "General")
+        if bloque_nombre not in bloques_ordenados:
+            bloques_ordenados.append(bloque_nombre)
+
+    for idx_bloque, bloque_nombre in enumerate(bloques_ordenados):
+        metricas_bloque = [m for m in metricas_validas if m.get("bloque_nombre", "General") == bloque_nombre]
+        if len(bloques_ordenados) > 1:
+            _agregar_portada_bloque(pdf, bloque_nombre)
+
+        for idx in range(0, len(metricas_bloque), 2):
+            pdf.add_page()
+            y_bloque_superior = 30
+            y_separador = 149
+            y_bloque_inferior = 156
+
+            _dibujar_bloque_metrica(
+                pdf,
+                metricas_bloque[idx],
                 estadistico,
-                nivel_analisis,
-                mostrar_tendencia=mostrar_tendencia,
+                metricas_bloque[idx].get("nivel_analisis", nivel_analisis),
+                y_inicio=y_bloque_superior,
+                alto_bloque=118,
             )
-        if not png_path:
-            continue
-
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 15)
-        pdf.set_text_color(*pdf.COLOR_AZUL)
-        pdf.cell(0, 10, f"Metrica: {metrica_nombre}", 0, 1)
-
-        pdf.set_font("Arial", "", 10)
-        pdf.set_text_color(70, 70, 70)
-        pdf.cell(0, 6, "La etiqueta de minutos se marca en rojo cuando Min < 60.", 0, 1)
-        pdf.ln(2)
-
-        pdf.image(png_path, x=10, y=pdf.get_y(), w=190)
-        os.unlink(png_path)
-
-        pdf.ln(106)
-        pdf.set_font("Arial", "B", 10)
-        pdf.set_text_color(*pdf.COLOR_AZUL)
-        pdf.cell(0, 7, "Resumen rapido", 0, 1)
-
-        pdf.set_font("Arial", "", 9)
-        pdf.set_text_color(60, 60, 60)
-        media = float(df_grafico["valor"].mean())
-        maximo = float(df_grafico["valor"].max())
-        minimo = float(df_grafico["valor"].min())
-        min_media = float(df_grafico["minutaje"].mean())
-        _escribir_texto_largo(
-            pdf,
-            (
-                f"Valor medio: {media:.2f} | Maximo: {maximo:.2f} | Minimo: {minimo:.2f} | "
-                f"Minutos medios: {min_media:.1f}"
-            ),
-            alto_linea=5,
-        )
-        if mostrar_tendencia:
-            resumen_tendencia = _calcular_resumen_tendencia(df_grafico)
-            _dibujar_tabla_tendencia(pdf, resumen_tendencia)
+            if idx + 1 < len(metricas_bloque):
+                _dibujar_separador_bloques(pdf, y_separador)
+                _dibujar_bloque_metrica(
+                    pdf,
+                    metricas_bloque[idx + 1],
+                    estadistico,
+                    metricas_bloque[idx + 1].get("nivel_analisis", nivel_analisis),
+                    y_inicio=y_bloque_inferior,
+                    alto_bloque=118,
+                )
 
     # Bloque final opcional con tarjetas por jugador.
     _agregar_detalle_individual(pdf, detalles_jugadores or [])
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(__file__).parent.parent / "informes_pdf"
     output_dir.mkdir(exist_ok=True)
-    output_path = output_dir / f"Informe_Equipo_{timestamp}.pdf"
+    if not output_filename:
+        output_filename = f"InformeEquipo_{nivel_analisis}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    output_path = output_dir / output_filename
     pdf.output(str(output_path))
     return str(output_path)
