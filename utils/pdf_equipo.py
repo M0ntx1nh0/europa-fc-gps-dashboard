@@ -13,6 +13,11 @@ import pandas as pd
 from fpdf import FPDF
 import plotly.graph_objects as go
 from utils.drive_loader import obtener_escudo_path
+from utils.minutaje_labels import (
+    obtener_label_minutos,
+    obtener_umbral_minutos,
+    usar_etiqueta_compacta,
+)
 
 
 class PDFEquipo(FPDF):
@@ -41,7 +46,14 @@ class PDFEquipo(FPDF):
             self.cell(0, 10, f"Pagina {self.page_no()-1}", 0, 0, "C")
 
 
-def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, mostrar_tendencia=False):
+def _crear_grafico_png(
+    df_grafico,
+    metrica_nombre,
+    estadistico,
+    nivel_analisis,
+    filtro_parte="Total",
+    mostrar_tendencia=False,
+):
     """Crea una imagen PNG con el gráfico de barras del análisis actual."""
     df_plot = df_grafico.copy()
     if df_plot.empty:
@@ -99,8 +111,9 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
     total_series = max(len(nombres), 1)
     width = min(0.7 / total_series, 0.32)
     total_barras = max(len(fechas) * total_series, 1)
+    usar_compacto = usar_etiqueta_compacta(total_series, len(fechas), soporte="pdf")
     fontsize_valor = max(9, min(14, int(15 - (total_barras * 0.14))))
-    fontsize_min = max(7, fontsize_valor - 2)
+    fontsize_min = max(8, fontsize_valor - 1)
 
     max_y = float(df_plot["valor"].max())
 
@@ -116,11 +129,18 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
 
         offsets = x + (idx - (total_series - 1) / 2) * width
         bars = ax.bar(offsets, valores, width=width * 0.92, color=color, label=nombre)
+        label_minutos = obtener_label_minutos(
+            nivel_analisis,
+            filtro_parte,
+            nombre_serie=nombre,
+            compacto=usar_compacto,
+        )
+        umbral_minutos = obtener_umbral_minutos(filtro_parte, nombre_serie=nombre)
 
         for i_bar, bar in enumerate(bars):
             if np.isnan(valores[i_bar]):
                 continue
-            min_color = "#d32f2f" if minutos[i_bar] < 60 else "#111111"
+            min_color = "#d32f2f" if minutos[i_bar] < umbral_minutos else "#111111"
             x_bar = bar.get_x() + bar.get_width() / 2
             y_bar = bar.get_height()
 
@@ -136,15 +156,15 @@ def _crear_grafico_png(df_grafico, metrica_nombre, estadistico, nivel_analisis, 
                 color="#111111",
             )
             ax.annotate(
-                f"Min={int(round(minutos[i_bar]))}'",
+                f"{label_minutos}={int(round(minutos[i_bar]))}'",
                 (x_bar, y_bar),
-                xytext=(0, 2),
+                xytext=(0, 1),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
                 fontsize=fontsize_min,
                 color=min_color,
-                bbox=dict(facecolor="white", edgecolor="none", alpha=0.72, pad=0.15),
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.78, pad=0.1),
             )
 
         # Línea de tendencia lineal opcional en el fallback de matplotlib.
@@ -498,6 +518,58 @@ def _dibujar_caja_comentarios(pdf, comentario):
     pdf.set_y(y_inicio + alto_caja + 2)
 
 
+def _agregar_glosario_final(pdf):
+    pdf.add_page()
+
+    pdf.set_font("Arial", "B", 16)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(0, 10, "Glosario de lectura", 0, 1)
+
+    pdf.ln(2)
+    pdf.set_font("Arial", "B", 12)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(0, 7, "Tramos de partido", 0, 1)
+
+    pdf.set_font("Arial", "", 11)
+    pdf.set_text_color(50, 50, 50)
+    _escribir_texto_largo(pdf, "Total: en Equipo y Por posiciones solo se consideran jugadores con mas de 60 minutos disputados.")
+    _escribir_texto_largo(pdf, "1ª Parte: incluye todos los registros disponibles de la primera parte.")
+    _escribir_texto_largo(pdf, "2ª Parte: incluye todos los registros disponibles de la segunda parte.")
+    _escribir_texto_largo(pdf, "1ª + 2ª (Conjunto): une ambas partes y trabaja con todos los valores disponibles, sin filtro de mas de 60 minutos.")
+    _escribir_texto_largo(pdf, "1ª + 2ª (Separadas): muestra por separado la primera y la segunda parte, manteniendo todos los registros disponibles.")
+
+    pdf.ln(3)
+    pdf.set_font("Arial", "B", 12)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(0, 7, "Etiquetas de minutos", 0, 1)
+
+    pdf.set_font("Arial", "", 11)
+    pdf.set_text_color(50, 50, 50)
+    _escribir_texto_largo(pdf, "Min total: minutos reales del jugador en el partido completo.")
+    _escribir_texto_largo(pdf, "Min 1ª / Min 2ª: minutos reales del jugador en la primera o en la segunda parte.")
+    _escribir_texto_largo(pdf, "Min acum: minutos acumulados del jugador al unir ambas partes.")
+    _escribir_texto_largo(pdf, "Min med: minutaje medio del grupo que entra en el calculo.")
+    _escribir_texto_largo(pdf, "Min med 1ª / Min med 2ª: minutaje medio del grupo en cada parte.")
+    _escribir_texto_largo(pdf, "Min med acum: minutaje medio del grupo al unir ambas partes.")
+    _escribir_texto_largo(pdf, "En graficos con muchas barras, las etiquetas pueden aparecer abreviadas como MT, M1ª, M2ª, MA, MM, MM1ª, MM2ª o MMA para mejorar la legibilidad.")
+
+    pdf.ln(3)
+    pdf.set_font("Arial", "B", 12)
+    pdf.set_text_color(*pdf.COLOR_AZUL)
+    pdf.cell(0, 7, "Regla visual", 0, 1)
+
+    pdf.set_font("Arial", "", 11)
+    pdf.set_text_color(50, 50, 50)
+    _escribir_texto_largo(pdf, "La etiqueta de minutos se marca en rojo cuando el minutaje es bajo para el tramo mostrado.")
+    _escribir_texto_largo(pdf, "El umbral es 60 minutos en Total y 1ª + 2ª (Conjunto), y 30 minutos en 1ª Parte, 2ª Parte y 1ª + 2ª (Separadas).")
+
+
+def _agregar_contraportada_blanca(pdf):
+    pdf.add_page()
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(0, 0, 210, 297, "F")
+
+
 def _draw_card_small(pdf, x, y, titulo, contenido_lista):
     """Tarjeta de métrica estilo informe individual."""
     pdf.set_draw_color(*pdf.COLOR_AZUL)
@@ -686,6 +758,7 @@ def _dibujar_bloque_metrica(pdf, metrica_data, estadistico, nivel_analisis, y_in
         metrica_nombre,
         estadistico,
         nivel_analisis,
+        filtro_parte=metrica_data.get("filtro_parte", "Total"),
         mostrar_tendencia=mostrar_tendencia,
     )
     if not png_path:
@@ -757,6 +830,7 @@ def generar_pdf_equipo(
     periodo_portada="Periodo",
     output_filename=None,
     resumen_bloques=None,
+    incluir_glosario=True,
 ):
     """
     Genera informe PDF de análisis de equipo.
@@ -826,13 +900,19 @@ def generar_pdf_equipo(
     _escribir_texto_largo(pdf, f"Nivel de analisis: {nivel_analisis}")
     _escribir_texto_largo(pdf, f"Estadistico: {estadistico}")
     _escribir_texto_largo(pdf, f"Filtro de partidos: {filtro_texto}")
-    _escribir_texto_largo(pdf, f"Alcance: {alcance_texto}")
     if resumen_bloques:
         _escribir_texto_largo(pdf, "Bloques incluidos: " + ", ".join([b["bloque"].title() for b in resumen_bloques]))
         for bloque in resumen_bloques:
-            _escribir_texto_largo(pdf, f"Alcance {bloque['bloque'].title()}: {bloque['alcance']}")
-            _escribir_texto_largo(pdf, f"Metricas {bloque['bloque'].title()}: {bloque['metricas']}")
+            pdf.ln(1)
+            pdf.set_font("Arial", "B", 11)
+            pdf.set_text_color(*pdf.COLOR_AZUL)
+            _escribir_texto_largo(pdf, f"Bloque {bloque['bloque'].title()}")
+            pdf.set_font("Arial", "", 11)
+            pdf.set_text_color(50, 50, 50)
+            _escribir_texto_largo(pdf, f"Alcance: {bloque['alcance']}")
+            _escribir_texto_largo(pdf, f"Metricas: {bloque['metricas']}")
     else:
+        _escribir_texto_largo(pdf, f"Alcance: {alcance_texto}")
         _escribir_texto_largo(
             pdf,
             "Metricas incluidas: " + ", ".join([m["metrica_nombre"] for m in metricas_pdf]),
@@ -894,6 +974,11 @@ def generar_pdf_equipo(
 
     # Bloque final opcional con tarjetas por jugador.
     _agregar_detalle_individual(pdf, detalles_jugadores or [])
+
+    if incluir_glosario:
+        _agregar_glosario_final(pdf)
+
+    _agregar_contraportada_blanca(pdf)
 
     output_dir = Path(__file__).parent.parent / "informes_pdf"
     output_dir.mkdir(exist_ok=True)

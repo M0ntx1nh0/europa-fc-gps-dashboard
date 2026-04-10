@@ -26,6 +26,11 @@ from utils import (
 )
 from utils.filtros import render_filtro_partidos
 from utils.pdf_equipo import generar_pdf_equipo
+from utils.minutaje_labels import (
+    obtener_label_minutos,
+    obtener_umbral_minutos,
+    usar_etiqueta_compacta,
+)
 
 # Configuración
 st.set_page_config(
@@ -484,40 +489,6 @@ def main():
         )
         return df_out
 
-    def obtener_contexto_tramo(nombre_serie=None):
-        tramo = filtro_parte
-        if filtro_parte == "1ª + 2ª (Separadas)" and nombre_serie is not None:
-            if str(nombre_serie).endswith(" - 1ª Parte"):
-                tramo = "1ª Parte"
-            elif str(nombre_serie).endswith(" - 2ª Parte"):
-                tramo = "2ª Parte"
-        return tramo
-
-    def obtener_label_minutos(nombre_serie=None):
-        tramo = obtener_contexto_tramo(nombre_serie)
-        if nivel_analisis == "Individual":
-            if tramo == "Total":
-                return "Min total"
-            if tramo == "1ª Parte":
-                return "Min 1ª"
-            if tramo == "2ª Parte":
-                return "Min 2ª"
-            return "Min acum"
-
-        if tramo == "Total":
-            return "Min med"
-        if tramo == "1ª Parte":
-            return "Min med 1ª"
-        if tramo == "2ª Parte":
-            return "Min med 2ª"
-        return "Min med acum"
-
-    def obtener_umbral_minutos(nombre_serie=None):
-        tramo = obtener_contexto_tramo(nombre_serie)
-        if tramo in ["1ª Parte", "2ª Parte"]:
-            return 30
-        return 60
-
     # Crear datos del gráfico para la métrica principal
     datos_grafico = construir_datos_grafico(metrica_col)
     
@@ -578,6 +549,14 @@ def main():
                 .tolist()
             )
 
+        usar_compacto = usar_etiqueta_compacta(
+            total_series=len(orden_series),
+            total_fechas=len(orden_labels_plot),
+            soporte="app",
+        )
+        total_barras = max(len(orden_series) * len(orden_labels_plot), 1)
+        font_size_texto = max(9, min(12, int(13 - (total_barras * 0.22))))
+
         for nombre in orden_series:
             df_grupo = df_local[df_local['nombre'] == nombre].sort_values('fecha').copy()
 
@@ -587,8 +566,19 @@ def main():
                 coef = np.polyfit(x_idx, y_vals, 1)
                 df_grupo["trend"] = coef[0] * x_idx + coef[1]
 
-            label_minutos = obtener_label_minutos(nombre)
-            umbral_minutos = obtener_umbral_minutos(nombre)
+            label_minutos = obtener_label_minutos(
+                nivel_analisis,
+                filtro_parte,
+                nombre_serie=nombre,
+                compacto=usar_compacto,
+            )
+            label_minutos_hover = obtener_label_minutos(
+                nivel_analisis,
+                filtro_parte,
+                nombre_serie=nombre,
+                compacto=False,
+            )
+            umbral_minutos = obtener_umbral_minutos(filtro_parte, nombre_serie=nombre)
             texto_barras = [
                 (
                     f"{metrica_nombre_plot}={row['valor']:.1f}<br>"
@@ -605,13 +595,13 @@ def main():
                 marker_color=df_grupo['color'].iloc[0],
                 text=texto_barras,
                 textposition='outside',
-                textfont=dict(size=10, color='black'),
+                textfont=dict(size=font_size_texto, color='black'),
                 cliponaxis=False,
                 hovertemplate=(
                     '<b>%{customdata[0]}</b><br>' +
                     f'{nombre}<br>' +
                     f'{metrica_nombre_plot}: %{{y:.1f}}<br>' +
-                    f'{label_minutos}: %{{customdata[1]:.0f}}\'<br>' +
+                    f'{label_minutos_hover}: %{{customdata[1]:.0f}}\'<br>' +
                     '<extra></extra>'
                 ),
                 customdata=np.column_stack((
@@ -697,6 +687,9 @@ def main():
         )
         st.caption(
             "El color rojo marca un minutaje bajo para el tramo mostrado: umbral de 60' en `Total` y `1ª + 2ª (Conjunto)`, y 30' en `1ª Parte`, `2ª Parte` y `1ª + 2ª (Separadas)`."
+        )
+        st.caption(
+            "Si el gráfico tiene muchas barras, la etiqueta visible se compacta para que siga siendo legible: `MT` = Min total, `M1ª` = Min 1ª, `M2ª` = Min 2ª, `MA` = Min acum, `MM` = Min med, `MM1ª` = Min med 1ª, `MM2ª` = Min med 2ª, `MMA` = Min med acum."
         )
 
     # Resumen de tendencia con semáforo
@@ -883,6 +876,12 @@ def main():
         "Añadir detalle individual de jugadores al final del informe",
         key="incluir_detalle_individual_pdf",
         value=(nivel_analisis == "Individual")
+    )
+
+    incluir_glosario_pdf = st.checkbox(
+        "Incluir glosario en el informe",
+        key="incluir_glosario_pdf_equipo",
+        value=True
     )
 
     jugadores_detalle_pdf = []
@@ -1086,7 +1085,8 @@ def main():
                                 mostrar_tendencia=mostrar_tendencia_pdf
                             ),
                             "mostrar_tendencia": mostrar_tendencia_pdf,
-                            "incluir_tabla_tendencia": incluir_tabla_tendencia_pdf
+                            "incluir_tabla_tendencia": incluir_tabla_tendencia_pdf,
+                            "filtro_parte": filtro_parte,
                         })
 
                 if incluir_bloque_equipo_pdf:
@@ -1185,7 +1185,8 @@ def main():
                         detalles_jugadores=detalles_jugadores_pdf,
                         periodo_portada=construir_periodo_portada(),
                         output_filename=construir_nombre_archivo_pdf(),
-                        resumen_bloques=construir_resumen_bloques_pdf()
+                        resumen_bloques=construir_resumen_bloques_pdf(),
+                        incluir_glosario=incluir_glosario_pdf,
                     )
                     with open(output_path, "rb") as f:
                         pdf_bytes = f.read()
