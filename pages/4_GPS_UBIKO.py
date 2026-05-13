@@ -468,6 +468,14 @@ def prepare_ubiko_dataset(df_all: pd.DataFrame) -> pd.DataFrame:
         if col not in df_all.columns:
             df_all[col] = np.nan
 
+    if "source_file" not in df_all.columns:
+        session_part = df_all["session"].fillna("sesion").astype(str).str.strip()
+        if "date" in df_all.columns:
+            date_part = pd.to_datetime(df_all["date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("sin-fecha")
+        else:
+            date_part = pd.Series(["sin-fecha"] * len(df_all), index=df_all.index)
+        df_all["source_file"] = session_part + "_" + date_part
+
     numeric_cols = [
         "time", "active_time", "effective_time", "total_distance", "minute_distance",
         "hmld", "hmld_relative", "hsr", "sprints", "max_speed", "num_acc_expl",
