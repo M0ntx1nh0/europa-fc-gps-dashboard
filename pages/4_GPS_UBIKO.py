@@ -8,6 +8,7 @@ Métricas principales: total_distance, minute_distance, hmld, hsr, sprints.
 
 import re
 import sys
+import tempfile
 import unicodedata
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,7 @@ sys.path.insert(0, str(root_dir))
 
 from config import PAGE_TITLE, PAGE_ICON, LAYOUT, COLORES
 from utils import render_sidebar, cargar_plantilla_desde_drive, mapear_posicion
+from utils.drive_loader import autenticar_google_drive, listar_archivos_carpeta, FOLDER_IDS
 
 st.set_page_config(
     page_title=f"{PAGE_TITLE} - GPS UBIKO",
@@ -30,8 +32,6 @@ st.set_page_config(
     layout=LAYOUT,
     initial_sidebar_state="collapsed",
 )
-
-UBIKO_DIR = root_dir / "data" / "ubiko"
 
 METRICAS_UBIKO = {
     "Distancia total": "total_distance",
@@ -459,36 +459,49 @@ def load_drive_positions() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_ubiko_dataset() -> pd.DataFrame:
-    files = sorted(UBIKO_DIR.glob("*.csv"))
     frames = []
+    drive = autenticar_google_drive(mostrar_mensajes=False)
+    folder_id = FOLDER_IDS.get("datos")
 
-    for file in files:
-        try:
-            df = pd.read_csv(file, sep=";", dtype=str, encoding="utf-8")
-        except UnicodeDecodeError:
-            df = pd.read_csv(file, sep=";", dtype=str, encoding="latin1")
-        except Exception:
-            continue
-
-        df.columns = [str(c).strip() for c in df.columns]
-        df["source_file"] = file.name
-
-        # Fallback por si algún export viene separado por coma en el futuro.
-        if len(df.columns) == 1 and ";" in df.columns[0]:
+    if drive is not None and folder_id:
+        archivos = listar_archivos_carpeta(drive, folder_id, patron="*.csv", mostrar_mensajes=False)
+        for archivo in sorted(archivos, key=lambda f: str(f.get("title", "")).lower()):
+            title = str(archivo.get("title", ""))
+            temp_path = None
             try:
-                df = pd.read_csv(file, sep=";", dtype=str, engine="python")
+                with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp_file:
+                    archivo.GetContentFile(tmp_file.name)
+                    temp_path = Path(tmp_file.name)
+
+                try:
+                    df = pd.read_csv(temp_path, sep=";", dtype=str, encoding="utf-8")
+                except UnicodeDecodeError:
+                    df = pd.read_csv(temp_path, sep=";", dtype=str, encoding="latin1")
+
                 df.columns = [str(c).strip() for c in df.columns]
-                df["source_file"] = file.name
+                df["source_file"] = title
+
+                # Fallback por si algún export viene separado por coma en el futuro.
+                if len(df.columns) == 1 and ";" in df.columns[0]:
+                    df = pd.read_csv(temp_path, sep=";", dtype=str, engine="python")
+                    df.columns = [str(c).strip() for c in df.columns]
+                    df["source_file"] = title
+
+                if "date" not in df.columns or df["date"].isna().all():
+                    df["date"] = extract_date_from_filename(Path(title))
+
+                if "session" not in df.columns:
+                    df["session"] = Path(title).stem.split("_")[0]
+
+                frames.append(df)
             except Exception:
                 continue
-
-        if "date" not in df.columns or df["date"].isna().all():
-            df["date"] = extract_date_from_filename(file)
-
-        if "session" not in df.columns:
-            df["session"] = file.stem.split("_")[0]
-
-        frames.append(df)
+            finally:
+                try:
+                    if temp_path is not None:
+                        temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     if not frames:
         return pd.DataFrame()
@@ -739,7 +752,7 @@ def main() -> None:
     df = load_ubiko_dataset()
 
     if df.empty:
-        st.error("No se han encontrado CSV de Ubiko en data/ubiko.")
+        st.error("No se han encontrado CSV de Ubiko en Google Drive.")
         st.stop()
 
     metricas_disponibles = {k: v for k, v in METRICAS_UBIKO.items() if v in df.columns}
