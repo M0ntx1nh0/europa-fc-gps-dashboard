@@ -458,56 +458,11 @@ def load_drive_positions() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_ubiko_dataset() -> pd.DataFrame:
-    frames = []
-    drive = autenticar_google_drive(mostrar_mensajes=False)
-    folder_id = FOLDER_IDS.get("datos")
-
-    if drive is not None and folder_id:
-        archivos = listar_archivos_carpeta(drive, folder_id, patron="*.csv", mostrar_mensajes=False)
-        for archivo in sorted(archivos, key=lambda f: str(f.get("title", "")).lower()):
-            title = str(archivo.get("title", ""))
-            temp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp_file:
-                    archivo.GetContentFile(tmp_file.name)
-                    temp_path = Path(tmp_file.name)
-
-                try:
-                    df = pd.read_csv(temp_path, sep=";", dtype=str, encoding="utf-8")
-                except UnicodeDecodeError:
-                    df = pd.read_csv(temp_path, sep=";", dtype=str, encoding="latin1")
-
-                df.columns = [str(c).strip() for c in df.columns]
-                df["source_file"] = title
-
-                # Fallback por si algún export viene separado por coma en el futuro.
-                if len(df.columns) == 1 and ";" in df.columns[0]:
-                    df = pd.read_csv(temp_path, sep=";", dtype=str, engine="python")
-                    df.columns = [str(c).strip() for c in df.columns]
-                    df["source_file"] = title
-
-                if "date" not in df.columns or df["date"].isna().all():
-                    df["date"] = extract_date_from_filename(Path(title))
-
-                if "session" not in df.columns:
-                    df["session"] = Path(title).stem.split("_")[0]
-
-                frames.append(df)
-            except Exception:
-                continue
-            finally:
-                try:
-                    if temp_path is not None:
-                        temp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-    if not frames:
+def prepare_ubiko_dataset(df_all: pd.DataFrame) -> pd.DataFrame:
+    if df_all is None or df_all.empty:
         return pd.DataFrame()
 
-    df_all = pd.concat(frames, ignore_index=True)
-
+    df_all = df_all.copy()
     # Columnas mínimas esperadas.
     for col in ["session", "task", "date", "position", "dorsal", "player"]:
         if col not in df_all.columns:
@@ -570,6 +525,57 @@ def load_ubiko_dataset() -> pd.DataFrame:
     )
 
     return df_all.sort_values(["date", "session_order", "player"]).reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_ubiko_dataset() -> pd.DataFrame:
+    frames = []
+    drive = autenticar_google_drive(mostrar_mensajes=False)
+    folder_id = FOLDER_IDS.get("datos")
+
+    if drive is not None and folder_id:
+        archivos = listar_archivos_carpeta(drive, folder_id, patron="*.csv", mostrar_mensajes=False)
+        for archivo in sorted(archivos, key=lambda f: str(f.get("title", "")).lower()):
+            title = str(archivo.get("title", ""))
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp_file:
+                    archivo.GetContentFile(tmp_file.name)
+                    temp_path = Path(tmp_file.name)
+
+                try:
+                    df = pd.read_csv(temp_path, sep=";", dtype=str, encoding="utf-8")
+                except UnicodeDecodeError:
+                    df = pd.read_csv(temp_path, sep=";", dtype=str, encoding="latin1")
+
+                df.columns = [str(c).strip() for c in df.columns]
+                df["source_file"] = title
+
+                if len(df.columns) == 1 and ";" in df.columns[0]:
+                    df = pd.read_csv(temp_path, sep=";", dtype=str, engine="python")
+                    df.columns = [str(c).strip() for c in df.columns]
+                    df["source_file"] = title
+
+                if "date" not in df.columns or df["date"].isna().all():
+                    df["date"] = extract_date_from_filename(Path(title))
+
+                if "session" not in df.columns:
+                    df["session"] = Path(title).stem.split("_")[0]
+
+                frames.append(df)
+            except Exception:
+                continue
+            finally:
+                try:
+                    if temp_path is not None:
+                        temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    if not frames:
+        return pd.DataFrame()
+
+    return prepare_ubiko_dataset(pd.concat(frames, ignore_index=True))
 
 
 def fmt_num(value: object, decimals: int = 1) -> str:
@@ -749,7 +755,11 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    df = load_ubiko_dataset()
+    df_session = st.session_state.get("df_procesado")
+    if st.session_state.get("datos_cargados", False) and df_session is not None and not df_session.empty:
+        df = prepare_ubiko_dataset(df_session)
+    else:
+        df = load_ubiko_dataset()
 
     if df.empty:
         st.error("No se han encontrado CSV de Ubiko en Google Drive.")
