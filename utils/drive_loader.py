@@ -208,19 +208,32 @@ def cargar_plantilla_desde_drive(equipo='europa'):
     
     folder_id = FOLDER_IDS['plantilla']
     
-    # Buscar archivo Excel de plantilla
-    archivos = listar_archivos_carpeta(drive, folder_id, patron='*.xlsx')
+    # Buscar archivo Excel de plantilla de forma flexible
+    archivos = listar_archivos_carpeta(drive, folder_id, patron='*')
+    archivos = [
+        f for f in archivos
+        if str(f.get('title', '')).lower().endswith(('.xlsx', '.xls'))
+    ]
     
     if not archivos:
         st.warning("⚠️ No se encontró archivo de plantilla en Drive")
         return None
     
-    # Usar el primer archivo encontrado
+    # Priorizar archivos cuyo nombre sugiera que son la plantilla principal
+    archivos = sorted(
+        archivos,
+        key=lambda f: (
+            0 if 'plantilla' in str(f.get('title', '')).lower() else 1,
+            0 if 'europa' in str(f.get('title', '')).lower() else 1,
+            str(f.get('title', '')).lower(),
+        )
+    )
     archivo = archivos[0]
     
     try:
         # Descargar temporalmente
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
+        suffix = '.xlsx' if str(archivo.get('title', '')).lower().endswith('.xlsx') else '.xls'
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
             archivo.GetContentFile(tmp_file.name)
             df_plantilla = pd.read_excel(tmp_file.name)
             os.unlink(tmp_file.name)
