@@ -238,6 +238,7 @@ def main():
             - **📊 Equipo:** Player Cards y análisis del partido
             - **👤 Individual:** Evolución y análisis por jugador
             - **📊 Estatus del Equipo:** <span class="new-badge">NUEVO</span> Vista panorámica con gráficos avanzados
+            - **📍 GPS UBIKO:** <span class="new-badge">NUEVO</span> Control real de carga por jugador con CSV Ubiko
             
             ---
             
@@ -328,6 +329,7 @@ def main():
         **Para análisis detallado:**
         - **👤 Individual:** Evolución temporal de cada jugador con filtros flexibles
         - **📊 Estatus del Equipo:** <span class="new-badge">NUEVO v2.5</span> Vista panorámica del equipo con múltiples filtros
+        - **📍 GPS UBIKO:** <span class="new-badge">NUEVO</span> Datos reales Ubiko por jugador, sesión y métrica
         
         #### 💡 **Características principales:**
         - **Filtros flexibles** en cada página (Partido específico / Últimos N / Rango de fechas)

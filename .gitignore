@@ -35,6 +35,12 @@ credentials.json
 # PDFs generados
 informes_pdf/*.pdf
 
+# Documentación de trabajo / entregables del proyecto
+documentacion/
+
+# Utilidades locales no integradas en la app
+utils/ubiko_gps.py
+
 # Logs y temporales
 *.log
 *.tmp
@@ -46,8 +52,8 @@ informes_pdf/*.pdf
 .idea/
 
 # Datos sensibles
-data/*.csv
-data/*.xlsx
+data/**/*.csv
+data/**/*.xlsx
 fotos_jugadores/*
 !fotos_jugadores/.gitkeep
 

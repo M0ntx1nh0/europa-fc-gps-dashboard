@@ -23,7 +23,7 @@ root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
 from config import PAGE_TITLE, PAGE_ICON, LAYOUT, COLORES
-from utils import render_sidebar, cargar_plantilla_desde_drive, mapear_posicion
+from utils import render_sidebar, cargar_plantilla_desde_drive, mapear_posicion, obtener_foto_jugador
 from utils.drive_loader import autenticar_google_drive, listar_archivos_carpeta, FOLDER_IDS
 
 st.set_page_config(
@@ -34,14 +34,23 @@ st.set_page_config(
 )
 
 METRICAS_UBIKO = {
-    "Distancia total": "total_distance",
+    "Aceleraciones": "num_acc_expl",
+    "Deceleraciones": "num_dec_expl",
     "Distancia / minuto": "minute_distance",
+    "Distancia a Sprint": "distance_vrange6",
+    "Distancia Total": "total_distance",
     "HMLD": "hmld",
+    "HMLD Relativo": "hmld_relative",
     "HSR": "hsr",
+    "HSR Relativo": "hsr_rel",
     "Sprints": "sprints",
+    "Velocidad Máxima": "max_speed",
 }
 
 METRIC_LABELS = {v: k for k, v in METRICAS_UBIKO.items()}
+
+UBIKO_METRICAS_ACUMULATIVAS = {"total_distance", "hmld", "hsr", "sprints"}
+UBIKO_METRICAS_MAXIMAS = {"max_speed"}
 
 SESSION_ORDER = {
     "partido": 0,
@@ -123,6 +132,28 @@ def inject_css() -> None:
             background: linear-gradient(180deg, rgba(18,29,41,.98), rgba(12,20,29,.98));
             border: 1px solid rgba(142,199,255,.16);
             box-shadow: 0 18px 45px rgba(0,0,0,.26);
+        }
+        .gps-player-card {
+            border-radius: 28px;
+            padding: 20px 18px 16px 18px;
+            background: linear-gradient(180deg, rgba(18,29,41,.98), rgba(12,20,29,.98));
+            border: 1px solid rgba(142,199,255,.16);
+            box-shadow: 0 18px 45px rgba(0,0,0,.26);
+            text-align: center;
+            height: 100%;
+        }
+        .gps-player-name {
+            font-size: 22px;
+            line-height: 1.1;
+            letter-spacing: -.03em;
+            font-weight: 900;
+            color: var(--gps-text);
+            margin: 14px 0 6px 0;
+        }
+        .gps-player-meta {
+            color: var(--gps-muted);
+            font-size: 13px;
+            line-height: 1.5;
         }
         .gps-section-title {
             font-size: 23px;
@@ -478,12 +509,18 @@ def prepare_ubiko_dataset(df_all: pd.DataFrame) -> pd.DataFrame:
 
     numeric_cols = [
         "time", "active_time", "effective_time", "total_distance", "minute_distance",
-        "hmld", "hmld_relative", "hsr", "sprints", "max_speed", "num_acc_expl",
+        "hmld", "hmld_relative", "hsr", "hsr_rel", "sprints", "max_speed", "num_acc_expl",
         "num_dec_expl", "player_load", "distance_vrange6",
     ]
     for col in numeric_cols:
         if col in df_all.columns:
             df_all[col] = df_all[col].apply(limpiar_numero_ubiko)
+
+    if {"hsr", "time"}.issubset(df_all.columns):
+        df_all["hsr_rel"] = np.where(df_all["time"] > 0, df_all["hsr"] / df_all["time"], np.nan)
+
+    if {"hmld", "time"}.issubset(df_all.columns):
+        df_all["hmld_relative"] = np.where(df_all["time"] > 0, df_all["hmld"] / df_all["time"], np.nan)
 
     df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
     df_all["player"] = df_all["player"].astype(str).str.strip()
@@ -615,16 +652,66 @@ def aggregate_metric(df: pd.DataFrame, metrica: str, estadistico: str) -> float:
     return float(serie.mean())
 
 
+def aggregate_session_rows(df_input: pd.DataFrame) -> pd.DataFrame:
+    if df_input is None or df_input.empty:
+        return pd.DataFrame(columns=df_input.columns if df_input is not None else [])
+
+    group_cols = ["source_file", "date", "player"]
+    df_sorted = df_input.sort_values(group_cols + ["session_order"]).copy()
+    rows = []
+
+    for _, group in df_sorted.groupby(group_cols, dropna=False, sort=False):
+        row = group.iloc[0].copy()
+
+        time_sum = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+        if pd.notna(time_sum):
+            row["time"] = float(time_sum)
+
+        for metric in METRICAS_UBIKO.values():
+            if metric not in group.columns:
+                continue
+
+            serie = pd.to_numeric(group[metric], errors="coerce")
+            valor = np.nan
+
+            if metric in UBIKO_METRICAS_ACUMULATIVAS:
+                valor = serie.sum(min_count=1)
+            elif metric == "minute_distance":
+                total_distance = pd.to_numeric(group.get("total_distance"), errors="coerce").sum(min_count=1) if "total_distance" in group.columns else np.nan
+                total_time = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+                if pd.notna(total_distance) and pd.notna(total_time) and total_time > 0:
+                    valor = total_distance / total_time
+                else:
+                    valor = serie.mean()
+            elif metric == "hsr_rel":
+                total_hsr = pd.to_numeric(group.get("hsr"), errors="coerce").sum(min_count=1) if "hsr" in group.columns else np.nan
+                total_time = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+                if pd.notna(total_hsr) and pd.notna(total_time) and total_time > 0:
+                    valor = total_hsr / total_time
+                else:
+                    valor = serie.mean()
+            elif metric == "hmld_relative":
+                total_hmld = pd.to_numeric(group.get("hmld"), errors="coerce").sum(min_count=1) if "hmld" in group.columns else np.nan
+                total_time = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+                if pd.notna(total_hmld) and pd.notna(total_time) and total_time > 0:
+                    valor = total_hmld / total_time
+                else:
+                    valor = serie.mean()
+            elif metric in UBIKO_METRICAS_MAXIMAS:
+                valor = serie.max()
+            else:
+                valor = serie.mean()
+
+            row[metric] = valor
+
+        rows.append(row)
+
+    return pd.DataFrame(rows).reset_index(drop=True)
+
+
 def create_line_chart(df_player: pd.DataFrame, metrica: str, jugador: str) -> go.Figure:
-    plot_df = (
-        df_player.groupby(["date", "session_group"], as_index=False)
-        .agg(
-            valor=(metrica, "mean"),
-            session_label=("session_label", "first"),
-            match_label=("match_label", "first"),
-        )
-        .sort_values("date")
-    )
+    plot_df = df_player.sort_values(["date", "session_order", "source_file"]).copy()
+    plot_df["valor"] = pd.to_numeric(plot_df[metrica], errors="coerce")
 
     fig = go.Figure()
     fig.add_trace(
@@ -710,8 +797,222 @@ def create_line_chart(df_player: pd.DataFrame, metrica: str, jugador: str) -> go
     return fig
 
 
+def create_comparison_bar_chart(
+    df_all: pd.DataFrame,
+    df_player: pd.DataFrame,
+    metrica: str,
+    estadistico: str,
+    jugador: str,
+    posicion_jugador: str,
+) -> pd.DataFrame:
+    fechas = sorted(df_player["date"].dropna().unique())
+    rows = []
+
+    for fecha in fechas:
+        df_fecha = df_all[df_all["date"] == fecha].copy()
+        df_fecha_jugador = df_fecha[df_fecha["player"] == jugador].copy()
+        df_fecha_posicion = df_fecha[df_fecha["position"] == posicion_jugador].copy()
+
+        rows.append(
+            {
+                "date": fecha,
+                "Jugador": aggregate_metric(df_fecha_jugador, metrica, estadistico),
+                "Posición": aggregate_metric(df_fecha_posicion, metrica, estadistico),
+                "Equipo": aggregate_metric(df_fecha, metrica, estadistico),
+                "session_group": (
+                    df_fecha_jugador["session_group"].iloc[0]
+                    if not df_fecha_jugador.empty
+                    else df_fecha["session_group"].iloc[0]
+                ),
+                "match_label": (
+                    df_fecha_jugador["match_label"].dropna().iloc[0]
+                    if not df_fecha_jugador.empty and "match_label" in df_fecha_jugador.columns and not df_fecha_jugador["match_label"].dropna().empty
+                    else (
+                        df_fecha["match_label"].dropna().iloc[0]
+                        if "match_label" in df_fecha.columns and not df_fecha["match_label"].dropna().empty
+                        else ""
+                    )
+                ),
+            }
+        )
+
+    plot_df = pd.DataFrame(rows)
+    if plot_df.empty:
+        return plot_df
+
+    plot_df = plot_df.sort_values("date")
+    return plot_df
+
+
+def create_comparison_bar_figure(plot_df: pd.DataFrame, metrica: str) -> go.Figure:
+    if plot_df is None or plot_df.empty:
+        return go.Figure()
+
+    x_labels = plot_df["date"].dt.strftime("%d/%m")
+    tick_text = []
+    for _, row in plot_df.iterrows():
+        label = row["date"].strftime("%d/%m")
+        if row.get("session_group") == "Partido":
+            tick_text.append(f"<span style='color:#FF5A5F'>{label}</span>")
+        else:
+            tick_text.append(label)
+
+    series_config = [
+        ("Equipo", "#4F8FCB"),
+        ("Posición", "#F4B942"),
+        ("Jugador", "#4DE0A8"),
+    ]
+
+    fig = go.Figure()
+    for serie, color in series_config:
+        fig.add_trace(
+            go.Bar(
+                x=x_labels,
+                y=plot_df[serie],
+                name=serie,
+                marker=dict(
+                    color=color,
+                    line=dict(color="rgba(255,255,255,.18)", width=1),
+                ),
+                hovertemplate="%{x}<br>" + serie + ": %{y:.1f}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        height=360,
+        margin=dict(l=20, r=20, t=25, b=20),
+        template="plotly_dark",
+        barmode="group",
+        bargap=0.34,
+        bargroupgap=0.16,
+        xaxis_title="Fecha",
+        yaxis_title=METRIC_LABELS.get(metrica, metrica),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(color="#F6FAFF"),
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#F6FAFF"),
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,.08)",
+            zerolinecolor="rgba(255,255,255,.10)",
+            tickmode="array",
+            tickvals=list(x_labels),
+            ticktext=tick_text,
+        ),
+        yaxis=dict(gridcolor="rgba(255,255,255,.10)", zerolinecolor="rgba(255,255,255,.12)"),
+    )
+    return fig
+
+
+def create_comparison_line_figure(plot_df: pd.DataFrame, metrica: str) -> go.Figure:
+    if plot_df is None or plot_df.empty:
+        return go.Figure()
+
+    series_config = [
+        ("Equipo", "#4F8FCB"),
+        ("Posición", "#F4B942"),
+        ("Jugador", "#4DE0A8"),
+    ]
+
+    fig = go.Figure()
+    for serie, color in series_config:
+        fig.add_trace(
+            go.Scatter(
+                x=plot_df["date"],
+                y=plot_df[serie],
+                mode="lines+markers",
+                name=serie,
+                line=dict(color=color, width=3),
+                marker=dict(size=7),
+                hovertemplate="%{x|%d/%m/%Y}<br>" + serie + ": %{y:.1f}<extra></extra>",
+            )
+        )
+
+    matches_df = plot_df[plot_df["session_group"] == "Partido"].copy() if "session_group" in plot_df.columns else pd.DataFrame()
+    if not matches_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=matches_df["date"],
+                y=matches_df["Jugador"],
+                mode="markers",
+                name="Partido",
+                marker=dict(
+                    size=10,
+                    color="#FF5A5F",
+                    line=dict(width=1.5, color="#FFD6D6"),
+                    symbol="diamond",
+                ),
+                customdata=matches_df[["match_label"]],
+                hovertemplate="%{x|%d/%m/%Y}<br>%{customdata[0]}<br>Jugador: %{y:.1f}<extra></extra>",
+            )
+        )
+
+        for _, row in matches_df.iterrows():
+            etiqueta = row["match_label"] or "Partido"
+            fig.add_vline(
+                x=row["date"],
+                line_dash="dash",
+                line_color="#FF5A5F",
+                line_width=1,
+                opacity=0.7,
+            )
+            fig.add_annotation(
+                x=row["date"],
+                y=0.02,
+                yref="paper",
+                text=etiqueta,
+                showarrow=False,
+                textangle=-90,
+                font=dict(size=9, color="#FF9EA0"),
+                xanchor="left",
+                yanchor="bottom",
+                bgcolor="rgba(7,12,18,0.60)",
+            )
+
+    fig.update_layout(
+        height=360,
+        margin=dict(l=20, r=20, t=25, b=20),
+        template="plotly_dark",
+        hovermode="x unified",
+        xaxis_title="Fecha",
+        yaxis_title=METRIC_LABELS.get(metrica, metrica),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(color="#F6FAFF"),
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#F6FAFF"),
+        xaxis=dict(gridcolor="rgba(255,255,255,.08)", zerolinecolor="rgba(255,255,255,.10)"),
+        yaxis=dict(gridcolor="rgba(255,255,255,.10)", zerolinecolor="rgba(255,255,255,.12)"),
+    )
+    return fig
+
+
 def create_ranking_chart(ranking: pd.DataFrame, metrica: str, jugador: str) -> go.Figure:
-    top = ranking.head(15).sort_values("valor", ascending=True)
+    top_n = ranking.head(15).copy()
+
+    # Mantener el foco del usuario: si el jugador seleccionado cae fuera del top 15,
+    # lo añadimos igualmente para que siempre aparezca en el ranking.
+    if jugador not in top_n["player"].values:
+        fila_jugador = ranking[ranking["player"] == jugador].head(1)
+        if not fila_jugador.empty:
+            top_n = pd.concat([top_n, fila_jugador], ignore_index=True)
+
+    top = (
+        top_n.drop_duplicates(subset=["player"], keep="last")
+        .sort_values("valor", ascending=True)
+    )
     colors = ["#6BEF9A" if p == jugador else "#2E86C1" for p in top["player"]]
 
     fig = go.Figure()
@@ -765,7 +1066,17 @@ def main() -> None:
 
     df_session = st.session_state.get("df_procesado")
     if st.session_state.get("datos_cargados", False) and df_session is not None and not df_session.empty:
-        df = prepare_ubiko_dataset(df_session)
+        ubiko_cache_key = (
+            st.session_state.get("ultima_carga_drive"),
+            len(df_session),
+            tuple(df_session.columns),
+        )
+        if st.session_state.get("ubiko_dataset_cache_key") == ubiko_cache_key:
+            df = st.session_state.get("ubiko_dataset_preparado", pd.DataFrame())
+        else:
+            df = prepare_ubiko_dataset(df_session)
+            st.session_state.ubiko_dataset_preparado = df
+            st.session_state.ubiko_dataset_cache_key = ubiko_cache_key
     else:
         df = load_ubiko_dataset()
 
@@ -863,8 +1174,8 @@ def main() -> None:
     tarea = d3.selectbox("Task", ["Todas"] + tareas, index=0)
     estadistico = d4.selectbox("Estadístico", ["Media", "Máximo", "P70", "P95", "Sumatorio"], index=0)
 
-    df_f = df.copy()
-    df_f = df_f[(df_f["date"].dt.date >= fecha_desde) & (df_f["date"].dt.date <= fecha_hasta)]
+    df_f_raw = df.copy()
+    df_f_raw = df_f_raw[(df_f_raw["date"].dt.date >= fecha_desde) & (df_f_raw["date"].dt.date <= fecha_hasta)]
 
     seleccion_tipos = seleccion_tipos or ["Todas"]
     if "Todas" in seleccion_tipos:
@@ -881,19 +1192,20 @@ def main() -> None:
         tipos_filtrados = [tipo for tipo in seleccion_tipos if tipo in tipos_sesion]
 
     if tipos_filtrados:
-        df_f = df_f[df_f["session_group"].isin(tipos_filtrados)]
+        df_f_raw = df_f_raw[df_f_raw["session_group"].isin(tipos_filtrados)]
     else:
-        df_f = df_f.iloc[0:0]
+        df_f_raw = df_f_raw.iloc[0:0]
 
     if posicion != "Todas":
-        df_f = df_f[df_f["position"] == posicion]
+        df_f_raw = df_f_raw[df_f_raw["position"] == posicion]
     if tarea != "Todas":
-        df_f = df_f[df_f["task"] == tarea]
+        df_f_raw = df_f_raw[df_f_raw["task"] == tarea]
 
-    if df_f.empty:
+    if df_f_raw.empty:
         st.warning("No hay datos con los filtros seleccionados.")
         st.stop()
 
+    df_f = aggregate_session_rows(df_f_raw)
     df_j = df_f[df_f["player"] == jugador].copy()
     if df_j.empty:
         st.warning("El jugador seleccionado no tiene registros con los filtros actuales.")
@@ -907,15 +1219,31 @@ def main() -> None:
     pct_pos = ((valor_jugador / valor_posicion) - 1) * 100 if valor_posicion and not pd.isna(valor_posicion) else np.nan
     p70_jugador = df_j[metrica].quantile(0.70)
     pico_jugador = df_j[metrica].max()
+    posicion_jugador = df_j["position"].mode().iloc[0] if not df_j["position"].mode().empty else "Sin posición"
+    foto_path = obtener_foto_jugador(jugador)
 
     st.markdown("<div class='gps-section-title'>Resumen ejecutivo del jugador</div>", unsafe_allow_html=True)
 
-    r1, r2, r3, r4, r5 = st.columns(5)
-    r1.metric(f"{estadistico} jugador", fmt_num(valor_jugador), metrica_nombre)
-    r2.metric("Pico", fmt_num(pico_jugador), "máximo sesión")
-    r3.metric("P70", fmt_num(p70_jugador), "umbral alto")
-    r4.metric("% vs equipo", fmt_pct(pct_equipo), "referencia global")
-    r5.metric("% vs posición", fmt_pct(pct_pos), "referencia específica")
+    c_foto, c_m1, c_m2, c_m3, c_m4, c_m5 = st.columns([0.9, 1, 1, 1, 1, 1])
+
+    with c_foto:
+        st.markdown('<div class="gps-player-card">', unsafe_allow_html=True)
+        if foto_path:
+            st.image(foto_path, use_column_width=True)
+        st.markdown(
+            f"""
+            <div class="gps-player-name">{jugador}</div>
+            <div class="gps-player-meta">{posicion_jugador}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    c_m1.metric(f"{estadistico} jugador", fmt_num(valor_jugador), metrica_nombre)
+    c_m2.metric("Pico", fmt_num(pico_jugador), "máximo sesión")
+    c_m3.metric("P70", fmt_num(p70_jugador), "umbral alto")
+    c_m4.metric("% vs equipo", fmt_pct(pct_equipo), "referencia global")
+    c_m5.metric("% vs posición", fmt_pct(pct_pos), "referencia específica")
 
     # ================================
     # VISUALES PRINCIPALES
@@ -941,7 +1269,52 @@ def main() -> None:
     ranking["% vs media"] = ((ranking["valor"] / ranking["valor"].mean()) - 1) * 100 if len(ranking) else np.nan
 
     with right:
+        st.markdown(
+            f"""
+            <div class="gps-muted" style="margin-bottom:8px;">
+                Ranking de referencia: se muestra el top 15 de la métrica seleccionada y, si hace falta,
+                también el jugador elegido (<b>{jugador}</b>) para mantener la comparación visible.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.plotly_chart(create_ranking_chart(ranking, metrica, jugador), use_container_width=True)
+
+    plot_df_comparison = create_comparison_bar_chart(
+        df_f,
+        df_j,
+        metrica,
+        estadistico,
+        jugador,
+        posicion_jugador,
+    )
+    comp_left, comp_right = st.columns([1.45, 1], gap="large")
+    with comp_left:
+        st.markdown(
+            """
+            <div class="gps-muted" style="margin:0 0 10px 2px;">
+                Comparativa por fecha entre el jugador, la media de su posición y la referencia global del equipo.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(
+            create_comparison_bar_figure(plot_df_comparison, metrica),
+            use_container_width=True,
+        )
+    with comp_right:
+        st.markdown(
+            """
+            <div class="gps-muted" style="margin:0 0 8px 2px;">
+                Tendencia resumida de las tres referencias según el estadístico seleccionado.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(
+            create_comparison_line_figure(plot_df_comparison, metrica),
+            use_container_width=True,
+        )
 
     # ================================
     # TABLAS PREMIUM
@@ -1042,8 +1415,8 @@ def main() -> None:
     )
 
     with st.expander("Ver registros originales de Ubiko filtrados"):
-        cols = ["source_file", "date", "session_group", "task", "position", "dorsal", "player"] + [c for c in METRICAS_UBIKO.values() if c in df_f.columns]
-        st.dataframe(df_f[cols].sort_values(["date", "player"]), use_container_width=True, hide_index=True)
+        cols = ["source_file", "date", "session_group", "task", "position", "dorsal", "player"] + [c for c in METRICAS_UBIKO.values() if c in df_f_raw.columns]
+        st.dataframe(df_f_raw[cols].sort_values(["date", "player"]), use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":
