@@ -5,7 +5,39 @@ Módulo de filtros reutilizables para todas las páginas
 import streamlit as st
 import pandas as pd
 from datetime import timedelta
+import re
+import unicodedata
 from utils import filtrar_por_fechas
+
+
+def _normalizar_texto(valor):
+    txt = str(valor or "").strip().lower()
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    txt = re.sub(r"[^a-z0-9]+", " ", txt)
+    return txt.strip()
+
+
+def es_partido(row):
+    session_txt = _normalizar_texto(row.get("session", ""))
+    task_txt = _normalizar_texto(row.get("task", ""))
+    combinado = f"{session_txt} {task_txt}".strip()
+
+    if re.search(r"\bj\d+\b", session_txt):
+        return True
+    if "san luqueno" in session_txt:
+        return True
+    if re.search(r"\b(partido|match|game)\b", combinado):
+        return True
+    if re.search(r"\b(periodo|parte|half|mitad|temps|tiempo)\b", task_txt):
+        return True
+    return False
+
+
+def filtrar_solo_partidos(df):
+    if df is None or len(df) == 0:
+        return df
+    return df[df.apply(es_partido, axis=1)].copy()
 
 
 def render_filtro_partidos(df, titulo="🎯 Filtros de Partido"):

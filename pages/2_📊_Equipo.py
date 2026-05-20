@@ -24,7 +24,7 @@ from utils import (
     mapear_posicion,
     obtener_foto_jugador
 )
-from utils.filtros import render_filtro_partidos
+from utils.filtros import render_filtro_partidos, filtrar_solo_partidos
 from utils.pdf_equipo import generar_pdf_equipo
 from utils.minutaje_labels import (
     obtener_label_minutos,
@@ -70,7 +70,12 @@ def main():
     # ========================================
     # FILTRO DE PARTIDOS
     # ========================================
-    df_filtrado, modo_partido, info_filtro = render_filtro_partidos(df, titulo="🎯 Filtros de Partido")
+    df_partidos = filtrar_solo_partidos(df)
+    if df_partidos is None or len(df_partidos) == 0:
+        st.warning("⚠️ No se han identificado partidos en los datos cargados.")
+        st.stop()
+
+    df_filtrado, modo_partido, info_filtro = render_filtro_partidos(df_partidos, titulo="🎯 Filtros de Partido")
     
     st.markdown("---")
     
