@@ -1,13 +1,14 @@
-# ⚽ Europa FC - Sistema de Análisis GPS v2.5.0
+# ⚽ CE Europa - Sistema de Análisis GPS v2.5.0
 
-Aplicación profesional de Streamlit para análisis de datos GPS de jugadores del Europa FC.
+Aplicación de Streamlit para visualización y análisis de datos GPS del CE Europa, con carga centralizada desde Google Drive y vistas específicas para equipo, jugador y GPS UBIKO.
 
 ## ✨ Características
 
 - 🔐 **Sistema de autenticación** con contraseñas
 - 📁 **Integración con Google Drive** (carga automática de datos)
-- 📊 **Análisis por equipo** con player cards y tabs analíticos
+- 📊 **Análisis por equipo** centrado en contexto de partido
 - 👤 **Análisis individual** con evolución temporal y comparativas
+- 📍 **Vista GPS UBIKO** con seguimiento individual avanzado y comparativas frente a equipo y posición
 - 📈 **Referencias normalizadas** a 94 minutos
 - 📄 **Exportación a PDF** de informes individuales
 - 🎨 **Interfaz moderna** con sidebar auto-ocultable
@@ -24,18 +25,21 @@ Europa_APP/
 ├── pages/                          # Páginas Streamlit
 │   ├── 2_📊_Equipo.py             # Análisis de equipo
 │   ├── 3_👤_Individual.py         # Análisis individual
-│   └── 4_📈_estatus_equipo.py     # Estado del equipo
+│   └── 4_GPS_UBIKO.py            # Vista avanzada de GPS UBIKO
 │
 ├── utils/                          # Módulos de utilidades
 │   ├── __init__.py                # Exports principales
 │   ├── auth.py                    # Sistema de autenticación
 │   ├── sidebar.py                 # Sidebar con auto-ocultación
-│   ├── data_loader.py             # Carga desde Google Drive
+│   ├── data_loader.py             # Carga principal de datos
+│   ├── drive_loader.py            # Integración con Google Drive
 │   ├── data_processor.py          # Procesamiento de datos
 │   ├── calculations.py            # Cálculos y normalizaciones
 │   ├── filtros.py                 # Sistema de filtros reutilizable
 │   ├── plantilla.py               # Gestión de plantilla de jugadores
+│   ├── minutaje_labels.py         # Etiquetas y reglas de minutos
 │   ├── visualizations.py          # Gráficos y fotos
+│   ├── ubiko_gps.py               # Utilidades específicas de UBIKO
 │   └── pdf_*.py                   # Generadores de PDF
 │
 ├── .streamlit/
@@ -101,7 +105,7 @@ git status  # NO debe aparecer secrets.toml
 
 # Commit y push
 git add .
-git commit -m "Deploy Europa FC GPS v2.5.0"
+git commit -m "Deploy CE Europa GPS v2.5.0"
 git push origin main
 ```
 
@@ -158,7 +162,7 @@ client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/tu-ser
 1. **Crear proyecto en Google Cloud Console:**
    - Ve a [console.cloud.google.com](https://console.cloud.google.com)
    - Crea un nuevo proyecto
-   - Nombre: "Europa FC GPS"
+   - Nombre: "CE Europa GPS"
 
 2. **Habilitar Google Drive API:**
    - En el proyecto, ve a "APIs & Services" → "Library"
@@ -211,18 +215,23 @@ client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/tu-ser
 ### **4. Navegar por las Páginas**
 
 #### **📊 Equipo**
-- Selector de partido único controla todo
-- Player cards con coloreado por referencia
-- 4 tabs analíticos: Distribución, evolución, matriz, datos
+- Vista colectiva orientada a partido
+- Filtro de partido específico, últimos N partidos o rango de fechas
+- Comparativas por equipo, posiciones o jugadores
+- Estadísticos como media, máximo, P70, P95 y sumatorio según contexto
 
 #### **👤 Individual**
 - Evolución individual con líneas acumuladas
 - Comparativa entre jugadores
 - Exportación a PDF de informes personalizados
+- Foto del jugador cuando está disponible
 
-#### **📈 Estatus Equipo**
-- Carga de entrenamientos
-- Análisis de estado físico general
+#### **📍 GPS UBIKO**
+- Vista específica para sesiones GPS UBIKO
+- Comparación del jugador frente al equipo y su posición
+- Tipo de sesión con multiselección, incluyendo `Todas` y `Todas menos partido`
+- Gráfico principal con marcadores de partido y referencias visuales
+- Ranking y comparativas por fecha
 
 ---
 
@@ -320,7 +329,7 @@ COLORES = {
 ### **Error: "No se encontraron datos"**
 - Verifica que la carpeta de Google Drive tenga CSV
 - Confirma que compartiste la carpeta con el service account
-- Revisa que los CSV tengan la columna `task='Total'`
+- Revisa que los CSV tengan las columnas base necesarias (`player`, `date`, `time`, `task`, etc.)
 
 ### **Error: "Authentication failed"**
 - Verifica las credenciales en `secrets.toml`
@@ -340,11 +349,10 @@ pip install -r requirements.txt --force-reinstall
 
 ## 📈 Roadmap
 
-- [ ] Integración con más proveedores GPS (Catapult, STATSports)
-- [ ] Dashboard de lesiones
-- [ ] Predicción de rendimiento con ML
-- [ ] Alertas automáticas de sobrecarga
-- [ ] API REST para integraciones
+- [ ] Seguir refinando la vista GPS UBIKO
+- [ ] Mejorar la documentación funcional y técnica
+- [ ] Añadir más automatismos de validación de datos
+- [ ] Incorporar nuevas vistas comparativas si el flujo del staff lo requiere
 
 ---
 
@@ -354,13 +362,13 @@ pip install -r requirements.txt --force-reinstall
 - **Montxinho** - Community Manager UDDEA & Analista MCODE Sport Analytics
 
 **Para:**
-- **Europa FC** - Análisis GPS y Rendimiento Físico
+- **CE Europa** - Análisis GPS y rendimiento físico
 
 ---
 
 ## 📄 Licencia
 
-Privado - Europa FC  
+Privado - CE Europa  
 Todos los derechos reservados © 2025
 
 ---
@@ -373,5 +381,5 @@ Para soporte técnico o consultas:
 
 ---
 
-**Europa FC GPS Analytics v2.5.0** ⚽📊  
-*Última actualización: Febrero 2026*
+**CE Europa GPS Analytics v2.5.0** ⚽📊  
+*Última actualización: Julio 2026*
