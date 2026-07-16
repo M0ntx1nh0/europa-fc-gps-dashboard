@@ -49,7 +49,17 @@ METRICAS_UBIKO = {
 
 METRIC_LABELS = {v: k for k, v in METRICAS_UBIKO.items()}
 
-UBIKO_METRICAS_ACUMULATIVAS = {"total_distance", "hmld", "hsr", "sprints"}
+# Métricas que representan volumen/cuenta y, si hubiera que reconstruir una
+# sesión sin fila "Total", deben sumarse entre tareas.
+UBIKO_METRICAS_ACUMULATIVAS = {
+    "total_distance",
+    "distance_vrange6",
+    "hmld",
+    "hsr",
+    "sprints",
+    "num_acc_expl",
+    "num_dec_expl",
+}
 UBIKO_METRICAS_MAXIMAS = {"max_speed"}
 
 SESSION_ORDER = {
@@ -661,38 +671,50 @@ def aggregate_session_rows(df_input: pd.DataFrame) -> pd.DataFrame:
     rows = []
 
     for _, group in df_sorted.groupby(group_cols, dropna=False, sort=False):
-        row = group.iloc[0].copy()
+        task_norm = group["task"].fillna("").astype(str).str.strip().str.lower() if "task" in group.columns else pd.Series("", index=group.index)
+        total_rows = group[task_norm.eq("total")].copy()
+        non_total_rows = group[~task_norm.eq("total")].copy()
 
-        time_sum = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+        # Si la sesión ya trae una fila "Total", la usamos como referencia para evitar
+        # duplicar la carga al sumar también todas las tareas individuales.
+        # Si no existe, agregamos sobre las tareas disponibles.
+        if not total_rows.empty:
+            metric_source = total_rows
+            row = total_rows.iloc[0].copy()
+        else:
+            metric_source = group
+            row = group.iloc[0].copy()
+
+        time_sum = pd.to_numeric(metric_source.get("time"), errors="coerce").sum(min_count=1) if "time" in metric_source.columns else np.nan
         if pd.notna(time_sum):
             row["time"] = float(time_sum)
 
         for metric in METRICAS_UBIKO.values():
-            if metric not in group.columns:
+            if metric not in metric_source.columns:
                 continue
 
-            serie = pd.to_numeric(group[metric], errors="coerce")
+            serie = pd.to_numeric(metric_source[metric], errors="coerce")
             valor = np.nan
 
             if metric in UBIKO_METRICAS_ACUMULATIVAS:
                 valor = serie.sum(min_count=1)
             elif metric == "minute_distance":
-                total_distance = pd.to_numeric(group.get("total_distance"), errors="coerce").sum(min_count=1) if "total_distance" in group.columns else np.nan
-                total_time = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+                total_distance = pd.to_numeric(metric_source.get("total_distance"), errors="coerce").sum(min_count=1) if "total_distance" in metric_source.columns else np.nan
+                total_time = pd.to_numeric(metric_source.get("time"), errors="coerce").sum(min_count=1) if "time" in metric_source.columns else np.nan
                 if pd.notna(total_distance) and pd.notna(total_time) and total_time > 0:
                     valor = total_distance / total_time
                 else:
                     valor = serie.mean()
             elif metric == "hsr_rel":
-                total_hsr = pd.to_numeric(group.get("hsr"), errors="coerce").sum(min_count=1) if "hsr" in group.columns else np.nan
-                total_time = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+                total_hsr = pd.to_numeric(metric_source.get("hsr"), errors="coerce").sum(min_count=1) if "hsr" in metric_source.columns else np.nan
+                total_time = pd.to_numeric(metric_source.get("time"), errors="coerce").sum(min_count=1) if "time" in metric_source.columns else np.nan
                 if pd.notna(total_hsr) and pd.notna(total_time) and total_time > 0:
                     valor = total_hsr / total_time
                 else:
                     valor = serie.mean()
             elif metric == "hmld_relative":
-                total_hmld = pd.to_numeric(group.get("hmld"), errors="coerce").sum(min_count=1) if "hmld" in group.columns else np.nan
-                total_time = pd.to_numeric(group.get("time"), errors="coerce").sum(min_count=1) if "time" in group.columns else np.nan
+                total_hmld = pd.to_numeric(metric_source.get("hmld"), errors="coerce").sum(min_count=1) if "hmld" in metric_source.columns else np.nan
+                total_time = pd.to_numeric(metric_source.get("time"), errors="coerce").sum(min_count=1) if "time" in metric_source.columns else np.nan
                 if pd.notna(total_hmld) and pd.notna(total_time) and total_time > 0:
                     valor = total_hmld / total_time
                 else:
